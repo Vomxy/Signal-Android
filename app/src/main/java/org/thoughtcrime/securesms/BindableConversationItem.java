@@ -8,6 +8,7 @@ import androidx.annotation.Nullable;
 import androidx.lifecycle.LifecycleOwner;
 import androidx.lifecycle.Observer;
 
+import org.signal.ringrtc.CallLinkRootKey;
 import org.thoughtcrime.securesms.components.voice.VoiceNotePlaybackState;
 import org.thoughtcrime.securesms.contactshare.Contact;
 import org.thoughtcrime.securesms.conversation.ConversationItem;
@@ -108,14 +109,14 @@ public interface BindableConversationItem extends Unbindable, GiphyMp4Playable, 
     void onInviteToSignalClicked();
     void onActivatePaymentsClicked();
     void onSendPaymentClicked(@NonNull RecipientId recipientId);
-    void onScheduledIndicatorClicked(@NonNull View view, @NonNull MessageRecord messageRecord);
-
+    void onScheduledIndicatorClicked(@NonNull View view, @NonNull ConversationMessage conversationMessage);
     /** @return true if handled, false if you want to let the normal url handling continue */
     boolean onUrlClicked(@NonNull String url);
-
     void onViewGiftBadgeClicked(@NonNull MessageRecord messageRecord);
     void onGiftBadgeRevealed(@NonNull MessageRecord messageRecord);
-
     void goToMediaPreview(ConversationItem parent, View sharedElement, MediaIntentFactory.MediaPreviewArgs args);
+    void onEditedIndicatorClicked(@NonNull MessageRecord messageRecord);
+    void onShowGroupDescriptionClicked(@NonNull String groupName, @NonNull String description, boolean shouldLinkifyWebLinks);
+    void onJoinCallLink(@NonNull CallLinkRootKey callLinkRootKey);
   }
 }

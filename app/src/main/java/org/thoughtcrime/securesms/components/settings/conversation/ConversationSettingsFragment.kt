@@ -19,13 +19,16 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.doOnPreDraw
 import androidx.fragment.app.viewModels
 import androidx.navigation.Navigation
+import androidx.navigation.fragment.navArgs
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import app.cash.exhaustive.Exhaustive
 import com.google.android.flexbox.FlexboxLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
+import io.reactivex.rxjava3.kotlin.subscribeBy
 import org.signal.core.util.DimensionUnit
+import org.signal.core.util.concurrent.LifecycleDisposable
 import org.signal.core.util.getParcelableArrayListExtraCompat
 import org.thoughtcrime.securesms.AvatarPreviewActivity
 import org.thoughtcrime.securesms.BlockUnblockDialog
@@ -49,6 +52,7 @@ import org.thoughtcrime.securesms.components.settings.configure
 import org.thoughtcrime.securesms.components.settings.conversation.preferences.AvatarPreference
 import org.thoughtcrime.securesms.components.settings.conversation.preferences.BioTextPreference
 import org.thoughtcrime.securesms.components.settings.conversation.preferences.ButtonStripPreference
+import org.thoughtcrime.securesms.components.settings.conversation.preferences.CallPreference
 import org.thoughtcrime.securesms.components.settings.conversation.preferences.GroupDescriptionPreference
 import org.thoughtcrime.securesms.components.settings.conversation.preferences.InternalPreference
 import org.thoughtcrime.securesms.components.settings.conversation.preferences.LargeIconClickPreference
@@ -83,8 +87,8 @@ import org.thoughtcrime.securesms.stories.viewer.AddToGroupStoryDelegate
 import org.thoughtcrime.securesms.stories.viewer.StoryViewerActivity
 import org.thoughtcrime.securesms.util.CommunicationActions
 import org.thoughtcrime.securesms.util.ContextUtil
+import org.thoughtcrime.securesms.util.DateUtils
 import org.thoughtcrime.securesms.util.ExpirationUtil
-import org.thoughtcrime.securesms.util.LifecycleDisposable
 import org.thoughtcrime.securesms.util.Material3OnScrollHelper
 import org.thoughtcrime.securesms.util.ViewUtil
 import org.thoughtcrime.securesms.util.adapter.mapping.MappingAdapter
@@ -92,6 +96,7 @@ import org.thoughtcrime.securesms.util.navigation.safeNavigate
 import org.thoughtcrime.securesms.util.views.SimpleProgressDialog
 import org.thoughtcrime.securesms.verify.VerifyIdentityActivity
 import org.thoughtcrime.securesms.wallpaper.ChatWallpaperActivity
+import java.util.Locale
 
 private const val REQUEST_CODE_VIEW_CONTACT = 1
 private const val REQUEST_CODE_ADD_CONTACT = 2
@@ -103,7 +108,9 @@ class ConversationSettingsFragment : DSLSettingsFragment(
   menuId = R.menu.conversation_settings
 ) {
 
+  private val args: ConversationSettingsFragmentArgs by navArgs()
   private val alertTint by lazy { ContextCompat.getColor(requireContext(), R.color.signal_alert_primary) }
+  private val alertDisabledTint by lazy { ContextCompat.getColor(requireContext(), R.color.signal_alert_primary_50) }
   private val blockIcon by lazy {
     ContextUtil.requireDrawable(requireContext(), R.drawable.ic_block_tinted_24).apply {
       colorFilter = PorterDuffColorFilter(alertTint, PorterDuff.Mode.SRC_IN)
@@ -122,12 +129,12 @@ class ConversationSettingsFragment : DSLSettingsFragment(
 
   private val viewModel by viewModels<ConversationSettingsViewModel>(
     factoryProducer = {
-      val args = ConversationSettingsFragmentArgs.fromBundle(requireArguments())
       val groupId = args.groupId as? ParcelableGroupId
 
       ConversationSettingsViewModel.Factory(
         recipientId = args.recipientId,
         groupId = ParcelableGroupId.get(groupId),
+        callMessageIds = args.callMessageIds ?: longArrayOf(),
         repository = ConversationSettingsRepository(requireContext())
       )
     }
@@ -180,6 +187,7 @@ class ConversationSettingsFragment : DSLSettingsFragment(
           progress.dismiss()
         }
       }
+
       REQUEST_CODE_RETURN_FROM_MEDIA -> viewModel.refreshSharedMedia()
       REQUEST_CODE_ADD_CONTACT -> viewModel.refreshRecipient()
       REQUEST_CODE_VIEW_CONTACT -> viewModel.refreshRecipient()
@@ -199,7 +207,7 @@ class ConversationSettingsFragment : DSLSettingsFragment(
   }
 
   override fun getMaterial3OnScrollHelper(toolbar: Toolbar?): Material3OnScrollHelper {
-    return object : Material3OnScrollHelper(requireActivity(), toolbar!!) {
+    return object : Material3OnScrollHelper(requireActivity(), toolbar!!, viewLifecycleOwner) {
       override val inactiveColorSet = ColorSet(
         toolbarColorRes = R.color.signal_colorBackground_0,
         statusBarColorRes = R.color.signal_colorBackground
@@ -219,6 +227,7 @@ class ConversationSettingsFragment : DSLSettingsFragment(
     InternalPreference.register(adapter)
     GroupDescriptionPreference.register(adapter)
     LegacyGroupPreference.register(adapter)
+    CallPreference.register(adapter)
 
     val recipientId = args.recipientId
     if (recipientId != null) {
@@ -376,6 +385,14 @@ class ConversationSettingsFragment : DSLSettingsFragment(
       customPref(
         ButtonStripPreference.Model(
           state = state.buttonStripState,
+          enabled = !state.isDeprecatedOrUnregistered,
+          onMessageClick = {
+            val intent = ConversationIntents
+              .createBuilderSync(requireContext(), state.recipient.id, state.threadId)
+              .build()
+
+            startActivity(intent)
+          },
           onAddToStoryClick = {
             if (state.recipient.isPushV2Group && state.requireGroupSettingsState().isAnnouncementGroup && !state.requireGroupSettingsState().isSelfAdmin) {
               MaterialAlertDialogBuilder(requireContext())
@@ -416,17 +433,31 @@ class ConversationSettingsFragment : DSLSettingsFragment(
             }
           },
           onSearchClick = {
-            val intent = ConversationIntents.createBuilder(requireContext(), state.recipient.id, state.threadId)
-              .withSearchOpen(true)
-              .build()
+            lifecycleDisposable += ConversationIntents.createBuilder(requireContext(), state.recipient.id, state.threadId)
+              .subscribeBy { builder ->
+                val intent = builder
+                  .withSearchOpen(true)
+                  .build()
 
-            startActivity(intent)
-            requireActivity().finish()
+                startActivity(intent)
+                requireActivity().finish()
+              }
           }
         )
       )
 
       dividerPref()
+
+      if (state.calls.isNotEmpty()) {
+        val firstCall = state.calls.first()
+        sectionHeaderPref(DSLSettingsText.from(DateUtils.formatDate(Locale.getDefault(), firstCall.record.timestamp)))
+
+        for (call in state.calls) {
+          customPref(call)
+        }
+
+        dividerPref()
+      }
 
       val summary = DSLSettingsText.from(formatDisappearingMessagesLifespan(state.disappearingMessagesLifespan))
       val icon = if (state.disappearingMessagesLifespan <= 0 || state.recipient.isBlocked) {
@@ -445,7 +476,7 @@ class ConversationSettingsFragment : DSLSettingsFragment(
           title = DSLSettingsText.from(R.string.ConversationSettingsFragment__disappearing_messages),
           summary = summary,
           icon = DSLSettingsIcon.from(icon),
-          isEnabled = enabled,
+          isEnabled = enabled && !state.isDeprecatedOrUnregistered,
           onClick = {
             val action = ConversationSettingsFragmentDirections.actionConversationSettingsFragmentToAppSettingsExpireTimer()
               .setInitialValue(state.disappearingMessagesLifespan)
@@ -471,6 +502,7 @@ class ConversationSettingsFragment : DSLSettingsFragment(
         clickPref(
           title = DSLSettingsText.from(R.string.ConversationSettingsFragment__sounds_and_notifications),
           icon = DSLSettingsIcon.from(R.drawable.ic_speaker_24),
+          isEnabled = !state.isDeprecatedOrUnregistered,
           onClick = {
             val action = ConversationSettingsFragmentDirections.actionConversationSettingsFragmentToSoundsAndNotificationsSettingsFragment(state.recipient.id)
 
@@ -491,6 +523,7 @@ class ConversationSettingsFragment : DSLSettingsFragment(
               }
             )
           }
+
           ContactLinkState.ADD -> {
             @Suppress("DEPRECATION")
             clickPref(
@@ -505,19 +538,19 @@ class ConversationSettingsFragment : DSLSettingsFragment(
               }
             )
           }
+
           ContactLinkState.NONE -> {
           }
         }
 
-        if (recipientState.identityRecord != null) {
-          clickPref(
-            title = DSLSettingsText.from(R.string.ConversationSettingsFragment__view_safety_number),
-            icon = DSLSettingsIcon.from(R.drawable.ic_safety_number_24),
-            onClick = {
-              startActivity(VerifyIdentityActivity.newIntent(requireActivity(), recipientState.identityRecord))
-            }
-          )
-        }
+        clickPref(
+          title = DSLSettingsText.from(R.string.ConversationSettingsFragment__view_safety_number),
+          icon = DSLSettingsIcon.from(R.drawable.ic_safety_number_24),
+          isEnabled = !state.isDeprecatedOrUnregistered,
+          onClick = {
+            VerifyIdentityActivity.startOrShowExchangeMessagesDialog(requireActivity(), recipientState.identityRecord)
+          }
+        )
       }
 
       if (state.sharedMedia != null && state.sharedMedia.count > 0) {
@@ -588,6 +621,7 @@ class ConversationSettingsFragment : DSLSettingsFragment(
               LargeIconClickPreference.Model(
                 title = DSLSettingsText.from(R.string.ConversationSettingsFragment__add_to_a_group),
                 icon = DSLSettingsIcon.from(R.drawable.add_to_a_group, NO_TINT),
+                isEnabled = !state.isDeprecatedOrUnregistered,
                 onClick = {
                   viewModel.onAddToGroup()
                 }
@@ -630,7 +664,7 @@ class ConversationSettingsFragment : DSLSettingsFragment(
           sectionHeaderPref(DSLSettingsText.from(resources.getQuantityString(R.plurals.ContactSelectionListFragment_d_members, memberCount, memberCount)))
         }
 
-        if (groupState.canAddToGroup) {
+        if (groupState.canAddToGroup && !state.isDeprecatedOrUnregistered) {
           customPref(
             LargeIconClickPreference.Model(
               title = DSLSettingsText.from(R.string.ConversationSettingsFragment__add_members),
@@ -673,6 +707,7 @@ class ConversationSettingsFragment : DSLSettingsFragment(
             title = DSLSettingsText.from(R.string.ConversationSettingsFragment__group_link),
             summary = DSLSettingsText.from(if (groupState.groupLinkEnabled) R.string.preferences_on else R.string.preferences_off),
             icon = DSLSettingsIcon.from(R.drawable.ic_link_16),
+            isEnabled = !state.isDeprecatedOrUnregistered,
             onClick = {
               navController.safeNavigate(ConversationSettingsFragmentDirections.actionConversationSettingsFragmentToShareableGroupLinkFragment(groupState.groupId.requireV2().toString()))
             }
@@ -681,6 +716,7 @@ class ConversationSettingsFragment : DSLSettingsFragment(
           clickPref(
             title = DSLSettingsText.from(R.string.ConversationSettingsFragment__requests_and_invites),
             icon = DSLSettingsIcon.from(R.drawable.ic_update_group_add_16),
+            isEnabled = !state.isDeprecatedOrUnregistered,
             onClick = {
               startActivity(ManagePendingAndRequestingMembersActivity.newIntent(requireContext(), groupState.groupId.requireV2()))
             }
@@ -690,6 +726,7 @@ class ConversationSettingsFragment : DSLSettingsFragment(
             clickPref(
               title = DSLSettingsText.from(R.string.ConversationSettingsFragment__permissions),
               icon = DSLSettingsIcon.from(R.drawable.ic_lock_24),
+              isEnabled = !state.isDeprecatedOrUnregistered,
               onClick = {
                 val action = ConversationSettingsFragmentDirections.actionConversationSettingsFragmentToPermissionsSettingsFragment(ParcelableGroupId.from(groupState.groupId))
                 navController.safeNavigate(action)
@@ -702,8 +739,9 @@ class ConversationSettingsFragment : DSLSettingsFragment(
           dividerPref()
 
           clickPref(
-            title = DSLSettingsText.from(R.string.conversation__menu_leave_group, alertTint),
+            title = DSLSettingsText.from(R.string.conversation__menu_leave_group, if (state.isDeprecatedOrUnregistered) alertDisabledTint else alertTint),
             icon = DSLSettingsIcon.from(leaveIcon),
+            isEnabled = !state.isDeprecatedOrUnregistered,
             onClick = {
               LeaveGroupDialog.handleLeavePushGroup(requireActivity(), groupState.groupId.requirePush(), null)
             }
@@ -732,12 +770,13 @@ class ConversationSettingsFragment : DSLSettingsFragment(
           else -> R.string.ConversationSettingsFragment__block
         }
 
-        val titleTint = if (isBlocked) null else alertTint
+        val titleTint = if (isBlocked) null else if (state.isDeprecatedOrUnregistered) alertDisabledTint else alertTint
         val blockUnblockIcon = if (isBlocked) unblockIcon else blockIcon
 
         clickPref(
           title = if (titleTint != null) DSLSettingsText.from(title, titleTint) else DSLSettingsText.from(title),
           icon = DSLSettingsIcon.from(blockUnblockIcon),
+          isEnabled = !state.isDeprecatedOrUnregistered,
           onClick = {
             if (state.recipient.isBlocked) {
               BlockUnblockDialog.showUnblockFor(requireContext(), viewLifecycleOwner.lifecycle, state.recipient) {

@@ -45,7 +45,7 @@ public class BackupDialog {
                                             @NonNull Runnable onBackupsEnabled)
   {
     String[]    password = BackupUtil.generateBackupPassphrase();
-    AlertDialog dialog   = new AlertDialog.Builder(context)
+    AlertDialog dialog   = new MaterialAlertDialogBuilder(context)
                                           .setTitle(R.string.BackupDialog_enable_local_backups)
                                           .setView(backupDirectorySelectionIntent != null ? R.layout.backup_enable_dialog_v29 : R.layout.backup_enable_dialog)
                                           .setPositiveButton(R.string.BackupDialog_enable_backups, null)
@@ -130,6 +130,7 @@ public class BackupDialog {
                                      Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
                     try {
+                       Log.d(TAG, "Starting choose backup location dialog");
                        fragment.startActivityForResult(intent, requestCode);
                      } catch (ActivityNotFoundException e) {
                        Toast.makeText(fragment.requireContext(), R.string.BackupDialog_no_file_picker_available, Toast.LENGTH_LONG)

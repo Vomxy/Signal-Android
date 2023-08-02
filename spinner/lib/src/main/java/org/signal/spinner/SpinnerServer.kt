@@ -8,6 +8,8 @@ import com.github.jknack.handlebars.Template
 import com.github.jknack.handlebars.helper.ConditionalHelpers
 import fi.iki.elonen.NanoHTTPD
 import org.signal.core.util.ExceptionUtil
+import org.signal.core.util.ForeignKeyConstraint
+import org.signal.core.util.getForeignKeys
 import org.signal.core.util.logging.Log
 import org.signal.spinner.Spinner.DatabaseConfig
 import java.lang.IllegalArgumentException
@@ -142,7 +144,7 @@ internal class SpinnerServer(
     }
 
     val query = "select * from $table limit $pageSize offset ${pageSize * pageIndex}"
-    val queryResult = dbConfig.db().query(query).use { it.toQueryResult(columnTransformers = dbConfig.columnTransformers) }
+    val queryResult = dbConfig.db().query(query).use { it.toQueryResult(columnTransformers = dbConfig.columnTransformers, table = table) }
 
     return renderTemplate(
       "browse",
@@ -262,14 +264,14 @@ internal class SpinnerServer(
     )
   }
 
-  private fun Cursor.toQueryResult(queryStartTimeNanos: Long = 0, columnTransformers: List<ColumnTransformer> = emptyList()): QueryResult {
+  private fun Cursor.toQueryResult(queryStartTimeNanos: Long = 0, columnTransformers: List<ColumnTransformer> = emptyList(), table: String? = null): QueryResult {
     val numColumns = this.columnCount
     val columns = mutableListOf<String>()
     val transformers = mutableListOf<ColumnTransformer>()
 
     for (i in 0 until numColumns) {
       val columnName = getColumnName(i)
-      val customTransformer: ColumnTransformer? = columnTransformers.find { it.matches(null, columnName) }
+      val customTransformer: ColumnTransformer? = columnTransformers.find { it.matches(table, columnName) }
 
       columns += if (customTransformer != null) {
         "$columnName *"
@@ -281,13 +283,13 @@ internal class SpinnerServer(
     }
 
     var timeOfFirstRowNanos = 0L
-    val rows = mutableListOf<List<String>>()
+    val rows = mutableListOf<List<String?>>()
     while (moveToNext()) {
       if (timeOfFirstRowNanos == 0L) {
         timeOfFirstRowNanos = System.nanoTime()
       }
 
-      val row = mutableListOf<String>()
+      val row = mutableListOf<String?>()
       for (i in 0 until numColumns) {
         val columnName: String = getColumnName(i)
         try {
@@ -458,7 +460,7 @@ internal class SpinnerServer(
 
   data class QueryResult(
     val columns: List<String>,
-    val rows: List<List<String>>,
+    val rows: List<List<String?>>,
     val rowCount: Int = rows.size,
     val timeToFirstRow: String,
     val timeToReadRows: String

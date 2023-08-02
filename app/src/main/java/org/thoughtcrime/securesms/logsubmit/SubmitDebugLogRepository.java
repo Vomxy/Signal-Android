@@ -29,13 +29,14 @@ import org.signal.core.util.Stopwatch;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPOutputStream;
 import java.util.zip.ZipEntry;
@@ -74,6 +75,7 @@ public class SubmitDebugLogRepository {
     add(new LogSectionJobs());
     add(new LogSectionConstraints());
     add(new LogSectionCapabilities());
+    add(new LogSectionMemory());
     add(new LogSectionLocalMetrics());
     add(new LogSectionFeatureFlags());
     add(new LogSectionPin());
@@ -179,11 +181,11 @@ public class SubmitDebugLogRepository {
     try {
       Stopwatch stopwatch = new Stopwatch("log-upload");
 
-      ParcelFileDescriptor[] fds     = ParcelFileDescriptor.createPipe();
-      Uri                    gzipUri = BlobProvider.getInstance()
-                                                   .forData(new ParcelFileDescriptor.AutoCloseInputStream(fds[0]), 0)
-                                                   .withMimeType("application/gzip")
-                                                   .createForSingleSessionOnDiskAsync(context, null, null);
+      ParcelFileDescriptor[] fds        = ParcelFileDescriptor.createPipe();
+      Future<Uri>            futureUri  = BlobProvider.getInstance()
+                                                      .forData(new ParcelFileDescriptor.AutoCloseInputStream(fds[0]), 0)
+                                                      .withMimeType("application/gzip")
+                                                      .createForSingleSessionOnDiskAsync(context);
 
       OutputStream gzipOutput = new GZIPOutputStream(new ParcelFileDescriptor.AutoCloseOutputStream(fds[1]));
 
@@ -202,6 +204,7 @@ public class SubmitDebugLogRepository {
       }
 
       StreamUtil.close(gzipOutput);
+      Uri gzipUri = futureUri.get();
 
       stopwatch.split("body");
 
@@ -228,7 +231,7 @@ public class SubmitDebugLogRepository {
       BlobProvider.getInstance().delete(context, gzipUri);
 
       return Optional.of(logUrl);
-    } catch (IOException e) {
+    } catch (IOException | RuntimeException | ExecutionException | InterruptedException e) {
       Log.w(TAG, "Error during log upload.", e);
       return Optional.empty();
     }

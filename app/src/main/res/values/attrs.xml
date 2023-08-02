@@ -57,6 +57,10 @@
         </attr>
     </declare-styleable>
 
+    <declare-styleable name="AvatarView">
+        <attr name="storyRingScale" format="float" />
+    </declare-styleable>
+
     <attr name="minWidth" format="dimension" />
     <attr name="maxWidth" format="dimension" />
     <attr name="minHeight" format="dimension" />
@@ -78,10 +82,6 @@
 
     <declare-styleable name="DeliveryStatusView">
         <attr name="iconColor" format="color" />
-    </declare-styleable>
-
-    <declare-styleable name="AlertView">
-        <attr name="useSmallIcon" format="boolean" />
     </declare-styleable>
 
     <declare-styleable name="AudioView">
@@ -142,6 +142,7 @@
         <attr name="emoji_forceCustom" format="boolean" />
         <attr name="emoji_renderMentions" format="boolean" />
         <attr name="emoji_forceJumbo" format="boolean" />
+        <attr name="emoji_renderSpoilers" format="boolean" />
     </declare-styleable>
 
     <declare-styleable name="EmojiImageView">
@@ -297,7 +298,8 @@
     <declare-styleable name="WebRtcAudioOutputToggleButtonState">
         <attr name="state_speaker_on" format="boolean" />
         <attr name="state_speaker_off" format="boolean" />
-        <attr name="state_headset_selected" format="boolean" />
+        <attr name="state_bt_headset_selected" format="boolean" />
+        <attr name="state_wired_headset_selected" format="boolean" />
         <attr name="state_speaker_selected" format="boolean" />
         <attr name="state_handset_selected" format="boolean" />
     </declare-styleable>
@@ -368,5 +370,9 @@
     <declare-styleable name="AnimatedInOutImageButton">
         <attr name="rotationWhenVisible" format="float" />
         <attr name="rotationWhenHidden" format="float" />
+    </declare-styleable>
+
+    <declare-styleable name="InsetAwareConstraintLayout">
+        <attr name="animateKeyboardChanges" format="boolean" />
     </declare-styleable>
 </resources>

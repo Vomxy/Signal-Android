@@ -3,23 +3,19 @@ package org.thoughtcrime.securesms.components;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
-import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.Annotation;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.Selection;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.TextUtils.TruncateAt;
-import android.text.style.CharacterStyle;
 import android.text.style.RelativeSizeSpan;
-import android.text.style.StrikethroughSpan;
-import android.text.style.StyleSpan;
-import android.text.style.TypefaceSpan;
 import android.util.AttributeSet;
 import android.view.ActionMode;
 import android.view.Menu;
@@ -27,6 +23,7 @@ import android.view.MenuItem;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 
+import androidx.annotation.IdRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
@@ -42,6 +39,7 @@ import org.thoughtcrime.securesms.components.mention.MentionAnnotation;
 import org.thoughtcrime.securesms.components.mention.MentionDeleter;
 import org.thoughtcrime.securesms.components.mention.MentionRendererDelegate;
 import org.thoughtcrime.securesms.components.mention.MentionValidatorWatcher;
+import org.thoughtcrime.securesms.components.spoiler.SpoilerRendererDelegate;
 import org.thoughtcrime.securesms.conversation.MessageSendType;
 import org.thoughtcrime.securesms.conversation.MessageStyler;
 import org.thoughtcrime.securesms.conversation.ui.inlinequery.InlineQuery;
@@ -63,25 +61,19 @@ import static org.thoughtcrime.securesms.database.MentionUtil.MENTION_STARTER;
 public class ComposeText extends EmojiEditText {
 
   private static final char EMOJI_STARTER       = ':';
-  private static final long EMOJI_KEYWORD_DELAY = 1500;
 
   private static final Pattern TIME_PATTERN = Pattern.compile("^[0-9]{1,2}:[0-9]{1,2}$");
 
   private CharSequence            hint;
   private SpannableString         subHint;
   private MentionRendererDelegate mentionRendererDelegate;
+  private SpoilerRendererDelegate spoilerRendererDelegate;
   private MentionValidatorWatcher mentionValidatorWatcher;
 
   @Nullable private InputPanel.MediaListener      mediaListener;
   @Nullable private CursorPositionChangedListener cursorPositionChangedListener;
   @Nullable private InlineQueryChangedListener    inlineQueryChangedListener;
-
-  private final Runnable keywordSearchRunnable = () -> {
-    Editable text = getText();
-    if (text != null && enoughToFilter(text, true)) {
-      performFiltering(text, true);
-    }
-  };
+  @Nullable private StylingChangedListener        stylingChangedListener;
 
   public ComposeText(Context context) {
     super(context);
@@ -164,6 +156,9 @@ public class ComposeText extends EmojiEditText {
 
       try {
         mentionRendererDelegate.draw(canvas, getText(), getLayout());
+        if (spoilerRendererDelegate != null) {
+          spoilerRendererDelegate.draw(canvas, getText(), getLayout());
+        }
       } finally {
         canvas.restoreToCount(checkpoint);
       }
@@ -199,6 +194,14 @@ public class ComposeText extends EmojiEditText {
     setHintWithChecks(hint);
   }
 
+  public void setDraftText(@Nullable CharSequence draftText) {
+    setText("");
+
+    if (draftText != null) {
+      append(draftText);
+    }
+  }
+
   public void appendInvite(String invite) {
     if (getText() == null) {
       return;
@@ -222,6 +225,10 @@ public class ComposeText extends EmojiEditText {
 
   public void setMentionValidator(@Nullable MentionValidatorWatcher.MentionValidator mentionValidator) {
     mentionValidatorWatcher.setMentionValidator(mentionValidator);
+  }
+
+  public void setStylingChangedListener(@Nullable StylingChangedListener listener) {
+    stylingChangedListener = listener;
   }
 
   private boolean isLandscape() {
@@ -287,15 +294,11 @@ public class ComposeText extends EmojiEditText {
 
   public boolean hasStyling() {
     CharSequence trimmed = getTextTrimmed();
-    return FeatureFlags.textFormatting() && (trimmed instanceof Spanned) && MessageStyler.hasStyling((Spanned) trimmed);
+    return (trimmed instanceof Spanned) && MessageStyler.hasStyling((Spanned) trimmed);
   }
 
   public @Nullable BodyRangeList getStyling() {
-    if (FeatureFlags.textFormatting()) {
-      return MessageStyler.getStyling(getTextTrimmed());
-    } else {
-      return null;
-    }
+    return MessageStyler.getStyling(getTextTrimmed());
   }
 
   private void initialize() {
@@ -309,79 +312,57 @@ public class ComposeText extends EmojiEditText {
     mentionValidatorWatcher = new MentionValidatorWatcher();
     addTextChangedListener(mentionValidatorWatcher);
 
-    if (FeatureFlags.textFormatting()) {
-      setCustomSelectionActionModeCallback(new ActionMode.Callback() {
-        @Override
-        public boolean onCreateActionMode(ActionMode mode, Menu menu) {
-          MenuItem copy         = menu.findItem(android.R.id.copy);
-          MenuItem cut          = menu.findItem(android.R.id.cut);
-          MenuItem paste        = menu.findItem(android.R.id.paste);
-          int      copyOrder    = copy != null ? copy.getOrder() : 0;
-          int      cutOrder     = cut != null ? cut.getOrder() : 0;
-          int      pasteOrder   = paste != null ? paste.getOrder() : 0;
-          int      largestOrder = Math.max(copyOrder, Math.max(cutOrder, pasteOrder));
+    spoilerRendererDelegate = new SpoilerRendererDelegate(this, true);
 
-          menu.add(0, R.id.edittext_bold, largestOrder, getContext().getString(R.string.TextFormatting_bold));
-          menu.add(0, R.id.edittext_italic, largestOrder, getContext().getString(R.string.TextFormatting_italic));
-          menu.add(0, R.id.edittext_strikethrough, largestOrder, getContext().getString(R.string.TextFormatting_strikethrough));
-          menu.add(0, R.id.edittext_monospace, largestOrder, getContext().getString(R.string.TextFormatting_monospace));
+    addTextChangedListener(new ComposeTextStyleWatcher());
 
-          return true;
+    setCustomSelectionActionModeCallback(new ActionMode.Callback() {
+      @Override
+      public boolean onCreateActionMode(ActionMode mode, Menu menu) {
+        MenuItem copy         = menu.findItem(android.R.id.copy);
+        MenuItem cut          = menu.findItem(android.R.id.cut);
+        MenuItem paste        = menu.findItem(android.R.id.paste);
+        int      copyOrder    = copy != null ? copy.getOrder() : 0;
+        int      cutOrder     = cut != null ? cut.getOrder() : 0;
+        int      pasteOrder   = paste != null ? paste.getOrder() : 0;
+        int      largestOrder = Math.max(copyOrder, Math.max(cutOrder, pasteOrder));
+
+        menu.add(0, R.id.edittext_bold, largestOrder, getContext().getString(R.string.TextFormatting_bold));
+        menu.add(0, R.id.edittext_italic, largestOrder, getContext().getString(R.string.TextFormatting_italic));
+        menu.add(0, R.id.edittext_strikethrough, largestOrder, getContext().getString(R.string.TextFormatting_strikethrough));
+        menu.add(0, R.id.edittext_monospace, largestOrder, getContext().getString(R.string.TextFormatting_monospace));
+        menu.add(0, R.id.edittext_spoiler, largestOrder, getContext().getString(R.string.TextFormatting_spoiler));
+
+        Editable text = getText();
+
+        if (text != null) {
+          int    start = getSelectionStart();
+          int    end   = getSelectionEnd();
+          if (MessageStyler.hasStyling(text, start, end)) {
+            menu.add(0, R.id.edittext_clear_formatting, largestOrder, getContext().getString(R.string.TextFormatting_clear_formatting));
+          }
         }
 
-        @Override
-        public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
-          Editable text = getText();
+        return true;
+      }
 
-          if (text == null) {
-            return false;
-          }
-
-          if (item.getItemId() != R.id.edittext_bold &&
-              item.getItemId() != R.id.edittext_italic &&
-              item.getItemId() != R.id.edittext_strikethrough &&
-              item.getItemId() != R.id.edittext_monospace) {
-            return false;
-          }
-
-          int start = getSelectionStart();
-          int end   = getSelectionEnd();
-
-          CharSequence    charSequence = text.subSequence(start, end);
-          SpannableString replacement  = new SpannableString(charSequence);
-          CharacterStyle  style        = null;
-
-          if (item.getItemId() == R.id.edittext_bold) {
-            style = MessageStyler.boldStyle();
-          } else if (item.getItemId() == R.id.edittext_italic) {
-            style = MessageStyler.italicStyle();
-          } else if (item.getItemId() == R.id.edittext_strikethrough) {
-            style = MessageStyler.strikethroughStyle();
-          } else if (item.getItemId() == R.id.edittext_monospace) {
-            style = MessageStyler.monoStyle();
-          }
-
-          if (style != null) {
-            replacement.setSpan(style, 0, charSequence.length(), Spannable.SPAN_EXCLUSIVE_INCLUSIVE);
-          }
-
-          clearComposingText();
-
-          text.replace(start, end, replacement);
-
+      @Override
+      public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
+        boolean handled = handleFormatText(item.getItemId());
+        if (handled) {
           mode.finish();
-          return true;
         }
+        return handled;
+      }
 
-        @Override
-        public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
-          return false;
-        }
+      @Override
+      public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
+        return false;
+      }
 
-        @Override
-        public void onDestroyActionMode(ActionMode mode) {}
-      });
-    }
+      @Override
+      public void onDestroyActionMode(ActionMode mode) {}
+    });
   }
 
   private void setHintWithChecks(@Nullable CharSequence newHint) {
@@ -532,6 +513,11 @@ public class ComposeText extends EmojiEditText {
     return -1;
   }
 
+  @Override
+  protected boolean shouldPersistSignalStylingWhenPasting() {
+    return true;
+  }
+
   /**
    * Return true if we think the user may be inputting a time.
    */
@@ -552,6 +538,60 @@ public class ComposeText extends EmojiEditText {
     }
 
     return TIME_PATTERN.matcher(text.subSequence(startOfToken, endOfToken)).find();
+  }
+
+  public boolean isTextHighlighted() {
+    return getText() != null && getSelectionStart() < getSelectionEnd();
+  }
+
+  public boolean handleFormatText(@IdRes int id) {
+    Editable text = getText();
+
+    if (text == null) {
+      return false;
+    }
+
+    if (id != R.id.edittext_bold &&
+        id != R.id.edittext_italic &&
+        id != R.id.edittext_strikethrough &&
+        id != R.id.edittext_monospace &&
+        id != R.id.edittext_spoiler &&
+        id != R.id.edittext_clear_formatting)
+    {
+      return false;
+    }
+
+    int                           start = getSelectionStart();
+    int                           end   = getSelectionEnd();
+    BodyRangeList.BodyRange.Style style = null;
+
+    if (id == R.id.edittext_bold) {
+      style = BodyRangeList.BodyRange.Style.BOLD;
+    } else if (id == R.id.edittext_italic) {
+      style = BodyRangeList.BodyRange.Style.ITALIC;
+    } else if (id == R.id.edittext_strikethrough) {
+      style = BodyRangeList.BodyRange.Style.STRIKETHROUGH;
+    } else if (id == R.id.edittext_monospace) {
+      style = BodyRangeList.BodyRange.Style.MONOSPACE;
+    } else if (id == R.id.edittext_spoiler) {
+      style = BodyRangeList.BodyRange.Style.SPOILER;
+    }
+
+    clearComposingText();
+
+    if (style != null) {
+      MessageStyler.toggleStyle(style, text, start, end);
+    } else {
+      MessageStyler.clearStyling(text, start, end);
+    }
+
+    Selection.setSelection(getText(), end);
+
+    if (stylingChangedListener != null) {
+      stylingChangedListener.onStylingChanged();
+    }
+
+    return true;
   }
 
   private static class CommitContentListener implements InputConnectionCompat.OnCommitContentListener {
@@ -600,4 +640,7 @@ public class ComposeText extends EmojiEditText {
     void onCursorPositionChanged(int start, int end);
   }
 
+  public interface StylingChangedListener {
+    void onStylingChanged();
+  }
 }

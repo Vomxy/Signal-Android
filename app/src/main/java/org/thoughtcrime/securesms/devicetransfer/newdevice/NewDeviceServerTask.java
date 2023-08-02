@@ -17,6 +17,7 @@ import org.thoughtcrime.securesms.backup.BackupPassphrase;
 import org.thoughtcrime.securesms.backup.FullBackupImporter;
 import org.thoughtcrime.securesms.crypto.AttachmentSecretProvider;
 import org.thoughtcrime.securesms.database.SignalDatabase;
+import org.thoughtcrime.securesms.jobmanager.impl.DataRestoreConstraint;
 import org.thoughtcrime.securesms.notifications.NotificationChannels;
 
 import java.io.IOException;
@@ -38,6 +39,7 @@ final class NewDeviceServerTask implements ServerTask {
 
     EventBus.getDefault().register(this);
     try {
+      DataRestoreConstraint.setRestoringData(true);
       SQLiteDatabase database = SignalDatabase.getBackupDatabase();
 
       String passphrase = "deadbeef";
@@ -49,7 +51,7 @@ final class NewDeviceServerTask implements ServerTask {
                                     inputStream,
                                     passphrase);
 
-      SignalDatabase.upgradeRestored(database);
+      SignalDatabase.runPostBackupRestoreTasks(database);
       NotificationChannels.getInstance().restoreContactNotificationChannels();
 
       AppInitialization.onPostBackupRestore(context);
@@ -58,11 +60,15 @@ final class NewDeviceServerTask implements ServerTask {
     } catch (FullBackupImporter.DatabaseDowngradeException e) {
       Log.w(TAG, "Failed due to the backup being from a newer version of Signal.", e);
       EventBus.getDefault().post(new Status(0, Status.State.FAILURE_VERSION_DOWNGRADE));
+    } catch (FullBackupImporter.ForeignKeyViolationException e) {
+      Log.w(TAG, "Failed due to foreign key constraint violations.", e);
+      EventBus.getDefault().post(new Status(0, Status.State.FAILURE_FOREIGN_KEY));
     } catch (IOException e) {
       Log.w(TAG, e);
       EventBus.getDefault().post(new Status(0, Status.State.FAILURE_UNKNOWN));
     } finally {
       EventBus.getDefault().unregister(this);
+      DataRestoreConstraint.setRestoringData(false);
     }
 
     long end = System.currentTimeMillis();
@@ -99,6 +105,7 @@ final class NewDeviceServerTask implements ServerTask {
       IN_PROGRESS,
       SUCCESS,
       FAILURE_VERSION_DOWNGRADE,
+      FAILURE_FOREIGN_KEY,
       FAILURE_UNKNOWN
     }
   }

@@ -2,6 +2,7 @@ package org.thoughtcrime.securesms.components.settings.conversation
 
 import android.database.Cursor
 import org.thoughtcrime.securesms.components.settings.conversation.preferences.ButtonStripPreference
+import org.thoughtcrime.securesms.components.settings.conversation.preferences.CallPreference
 import org.thoughtcrime.securesms.components.settings.conversation.preferences.LegacyGroupPreference
 import org.thoughtcrime.securesms.database.model.IdentityRecord
 import org.thoughtcrime.securesms.database.model.StoryViewState
@@ -13,12 +14,14 @@ data class ConversationSettingsState(
   val threadId: Long = -1,
   val storyViewState: StoryViewState = StoryViewState.NONE,
   val recipient: Recipient = Recipient.UNKNOWN,
+  val isDeprecatedOrUnregistered: Boolean = false,
   val buttonStripState: ButtonStripPreference.State = ButtonStripPreference.State(),
   val disappearingMessagesLifespan: Int = 0,
   val canModifyBlockedState: Boolean = false,
   val sharedMedia: Cursor? = null,
   val sharedMediaIds: List<Long> = listOf(),
   val displayInternalRecipientDetails: Boolean = false,
+  val calls: List<CallPreference.Model> = emptyList(),
   private val sharedMediaLoaded: Boolean = false,
   private val specificSettingsState: SpecificSettingsState
 ) {

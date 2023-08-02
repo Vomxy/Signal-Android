@@ -70,7 +70,7 @@ public class OutgoingCallActionProcessor extends DeviceAwareActionProcessor {
 
     boolean isVideoCall = offerType == OfferMessage.Type.VIDEO_CALL;
 
-    webRtcInteractor.setCallInProgressNotification(TYPE_OUTGOING_RINGING, remotePeer);
+    webRtcInteractor.setCallInProgressNotification(TYPE_OUTGOING_RINGING, remotePeer, isVideoCall);
     webRtcInteractor.setDefaultAudioDevice(remotePeer.getId(),
                                            isVideoCall ? SignalAudioManager.AudioDevice.SPEAKER_PHONE : SignalAudioManager.AudioDevice.EARPIECE,
                                            false);
@@ -85,12 +85,12 @@ public class OutgoingCallActionProcessor extends DeviceAwareActionProcessor {
 
     RecipientUtil.setAndSendUniversalExpireTimerIfNecessary(context, Recipient.resolved(remotePeer.getId()), SignalDatabase.threads().getThreadIdIfExistsFor(remotePeer.getId()));
 
-    SignalDatabase.calls().insertCall(remotePeer.getCallId().longValue(),
-                                      System.currentTimeMillis(),
-                                      remotePeer.getId(),
+    SignalDatabase.calls().insertOneToOneCall(remotePeer.getCallId().longValue(),
+                                              System.currentTimeMillis(),
+                                              remotePeer.getId(),
                                       isVideoCall ? CallTable.Type.VIDEO_CALL : CallTable.Type.AUDIO_CALL,
-                                      CallTable.Direction.OUTGOING,
-                                      CallTable.Event.ONGOING);
+                                              CallTable.Direction.OUTGOING,
+                                              CallTable.Event.ONGOING);
 
     EglBaseWrapper.replaceHolder(EglBaseWrapper.OUTGOING_PLACEHOLDER, remotePeer.getCallId().longValue());
 
@@ -157,7 +157,7 @@ public class OutgoingCallActionProcessor extends DeviceAwareActionProcessor {
                                                 videoState.requireCamera(),
                                                 callSetupState.getIceServers(),
                                                 callSetupState.isAlwaysTurnServers(),
-                                                NetworkUtil.getCallingBandwidthMode(context),
+                                                NetworkUtil.getCallingDataMode(context),
                                                 AUDIO_LEVELS_INTERVAL,
                                                 currentState.getCallSetupState(activePeer).isEnableVideoOnCreate());
     } catch (CallException e) {

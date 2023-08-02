@@ -7,13 +7,13 @@ import org.signal.core.util.delete
 import org.signal.core.util.logging.Log
 import org.signal.core.util.readToList
 import org.signal.core.util.requireLong
-import org.signal.core.util.toSingleLine
 import org.signal.core.util.update
 
 /**
  * When we ran [V166_ThreadAndMessageForeignKeys], we forgot to update the actual table definition in [ThreadTable].
  * We could make this conditional, but I'd rather run it on everyone just so it's more predictable.
  */
+@Suppress("ClassName")
 object V171_ThreadForeignKeyFix : SignalDatabaseMigration {
 
   private val TAG = Log.tag(V171_ThreadForeignKeyFix::class.java)
@@ -38,7 +38,7 @@ object V171_ThreadForeignKeyFix : SignalDatabaseMigration {
         COUNT(*) AS thread_count 
       FROM thread 
       GROUP BY recipient_id HAVING thread_count > 1
-    """.toSingleLine()
+    """
     ).use { cursor ->
       while (cursor.moveToNext()) {
         val recipientId = cursor.requireLong("recipient_id")

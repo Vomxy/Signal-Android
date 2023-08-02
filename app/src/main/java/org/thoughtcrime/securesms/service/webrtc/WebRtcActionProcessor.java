@@ -472,7 +472,7 @@ public abstract class WebRtcActionProcessor {
                        .build();
   }
 
-  protected @NonNull WebRtcServiceState handleSetUserAudioDevice(@NonNull WebRtcServiceState currentState, @NonNull SignalAudioManager.AudioDevice userDevice) {
+  protected @NonNull WebRtcServiceState handleSetUserAudioDevice(@NonNull WebRtcServiceState currentState, @NonNull SignalAudioManager.ChosenAudioDeviceIdentifier userDevice) {
     Log.i(tag, "handleSetUserAudioDevice not processed");
     return currentState;
   }
@@ -559,9 +559,9 @@ public abstract class WebRtcActionProcessor {
   protected @NonNull WebRtcServiceState handleNetworkRouteChanged(@NonNull WebRtcServiceState currentState, @NonNull NetworkRoute networkRoute) {
     Log.i(tag, "onNetworkRouteChanged: localAdapterType: " + networkRoute.getLocalAdapterType());
     try {
-      webRtcInteractor.getCallManager().updateBandwidthMode(NetworkUtil.getCallingBandwidthMode(context, networkRoute.getLocalAdapterType()));
+      webRtcInteractor.getCallManager().updateDataMode(NetworkUtil.getCallingDataMode(context, networkRoute.getLocalAdapterType()));
     } catch (CallException e) {
-      Log.w(tag, "Unable to update bandwidth mode on CallManager", e);
+      Log.w(tag, "Unable to update data mode on CallManager", e);
     }
 
     PeerConnection.AdapterType type = networkRoute.getLocalAdapterType();
@@ -572,11 +572,11 @@ public abstract class WebRtcActionProcessor {
                        .build();
   }
 
-  protected @NonNull WebRtcServiceState handleBandwidthModeUpdate(@NonNull WebRtcServiceState currentState) {
+  protected @NonNull WebRtcServiceState handleDataModeUpdate(@NonNull WebRtcServiceState currentState) {
     try {
-      webRtcInteractor.getCallManager().updateBandwidthMode(NetworkUtil.getCallingBandwidthMode(context));
+      webRtcInteractor.getCallManager().updateDataMode(NetworkUtil.getCallingDataMode(context));
     } catch (CallException e) {
-      Log.i(tag, "handleBandwidthModeUpdate: could not update bandwidth mode.");
+      Log.i(tag, "handleDataModeUpdate: could not update data mode.");
     }
 
     return currentState;
@@ -798,9 +798,11 @@ public abstract class WebRtcActionProcessor {
       if (ringUpdate != RingUpdate.BUSY_LOCALLY && ringUpdate != RingUpdate.BUSY_ON_ANOTHER_DEVICE) {
         webRtcInteractor.getCallManager().cancelGroupRing(groupId.getDecodedId(), ringId, CallManager.RingCancelReason.Busy);
       }
-      SignalDatabase.groupCallRings().insertOrUpdateGroupRing(ringId,
-                                                              System.currentTimeMillis(),
-                                                              ringUpdate == RingUpdate.REQUESTED ? RingUpdate.BUSY_LOCALLY : ringUpdate);
+      SignalDatabase.calls().insertOrUpdateGroupCallFromRingState(ringId,
+                                                                  remotePeerGroup.getId(),
+                                                                  sender,
+                                                                  System.currentTimeMillis(),
+                                                                  ringUpdate == RingUpdate.REQUESTED ? RingUpdate.BUSY_LOCALLY : ringUpdate);
     } catch (CallException e) {
       Log.w(tag, "Unable to cancel ring", e);
     }
@@ -826,7 +828,7 @@ public abstract class WebRtcActionProcessor {
     Recipient recipient = currentState.getCallInfoState().getCallRecipient();
 
     if (recipient != null && currentState.getCallInfoState().getGroupCallState().isConnected()) {
-      webRtcInteractor.sendGroupCallMessage(recipient, WebRtcUtil.getGroupCallEraId(groupCall));
+      webRtcInteractor.sendGroupCallMessage(recipient, WebRtcUtil.getGroupCallEraId(groupCall), false, false);
     }
 
     currentState = currentState.builder()

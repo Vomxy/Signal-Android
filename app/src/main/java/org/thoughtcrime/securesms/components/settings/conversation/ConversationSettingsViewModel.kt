@@ -3,9 +3,10 @@ package org.thoughtcrime.securesms.components.settings.conversation
 import android.database.Cursor
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.Transformations
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.distinctUntilChanged
+import androidx.lifecycle.map
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.disposables.CompositeDisposable
@@ -16,10 +17,12 @@ import org.signal.core.util.CursorUtil
 import org.signal.core.util.ThreadUtil
 import org.signal.core.util.concurrent.SignalExecutors
 import org.thoughtcrime.securesms.components.settings.conversation.preferences.ButtonStripPreference
+import org.thoughtcrime.securesms.components.settings.conversation.preferences.CallPreference
 import org.thoughtcrime.securesms.components.settings.conversation.preferences.LegacyGroupPreference
 import org.thoughtcrime.securesms.database.AttachmentTable
 import org.thoughtcrime.securesms.database.RecipientTable
 import org.thoughtcrime.securesms.database.model.StoryViewState
+import org.thoughtcrime.securesms.dependencies.ApplicationDependencies
 import org.thoughtcrime.securesms.groups.GroupId
 import org.thoughtcrime.securesms.groups.LiveGroup
 import org.thoughtcrime.securesms.groups.v2.GroupAddMembersResult
@@ -28,11 +31,13 @@ import org.thoughtcrime.securesms.recipients.Recipient
 import org.thoughtcrime.securesms.recipients.RecipientId
 import org.thoughtcrime.securesms.recipients.RecipientUtil
 import org.thoughtcrime.securesms.util.FeatureFlags
+import org.thoughtcrime.securesms.util.TextSecurePreferences
 import org.thoughtcrime.securesms.util.livedata.LiveDataUtil
 import org.thoughtcrime.securesms.util.livedata.Store
 import java.util.Optional
 
 sealed class ConversationSettingsViewModel(
+  private val callMessageIds: LongArray,
   private val repository: ConversationSettingsRepository,
   specificSettingsState: SpecificSettingsState
 ) : ViewModel() {
@@ -44,7 +49,8 @@ sealed class ConversationSettingsViewModel(
 
   protected val store = Store(
     ConversationSettingsState(
-      specificSettingsState = specificSettingsState
+      specificSettingsState = specificSettingsState,
+      isDeprecatedOrUnregistered = SignalStore.misc().isClientDeprecated || TextSecurePreferences.isUnauthorizedReceived(ApplicationDependencies.getApplication())
     )
   )
   protected val internalEvents: Subject<ConversationSettingsEvent> = PublishSubject.create()
@@ -57,11 +63,15 @@ sealed class ConversationSettingsViewModel(
   protected val disposable = CompositeDisposable()
 
   init {
-    val threadId: LiveData<Long> = Transformations.distinctUntilChanged(Transformations.map(state) { it.threadId })
+    val threadId: LiveData<Long> = state.map { it.threadId }.distinctUntilChanged()
     val updater: LiveData<Long> = LiveDataUtil.combineLatest(threadId, sharedMediaUpdateTrigger) { tId, _ -> tId }
 
     val sharedMedia: LiveData<Optional<Cursor>> = LiveDataUtil.mapAsync(SignalExecutors.BOUNDED, updater) { tId ->
       repository.getThreadMedia(tId)
+    }
+
+    store.update(repository.getCallEvents(callMessageIds).toObservable()) { callRecords, state ->
+      state.copy(calls = callRecords.map { (call, messageRecord) -> CallPreference.Model(call, messageRecord) })
     }
 
     store.update(sharedMedia) { cursor, state ->
@@ -128,8 +138,10 @@ sealed class ConversationSettingsViewModel(
 
   private class RecipientSettingsViewModel(
     private val recipientId: RecipientId,
+    private val callMessageIds: LongArray,
     private val repository: ConversationSettingsRepository
   ) : ConversationSettingsViewModel(
+    callMessageIds,
     repository,
     SpecificSettingsState.RecipientSettingsState()
   ) {
@@ -151,12 +163,13 @@ sealed class ConversationSettingsViewModel(
         state.copy(
           recipient = recipient,
           buttonStripState = ButtonStripPreference.State(
+            isMessageAvailable = callMessageIds.isNotEmpty(),
             isVideoAvailable = recipient.registered == RecipientTable.RegisteredState.REGISTERED && !recipient.isSelf && !recipient.isBlocked && !recipient.isReleaseNotes,
             isAudioAvailable = isAudioAvailable,
             isAudioSecure = recipient.registered == RecipientTable.RegisteredState.REGISTERED,
             isMuted = recipient.isMuted,
             isMuteAvailable = !recipient.isSelf,
-            isSearchAvailable = true
+            isSearchAvailable = callMessageIds.isEmpty()
           ),
           disappearingMessagesLifespan = recipient.expiresInSeconds,
           canModifyBlockedState = !recipient.isSelf && RecipientUtil.isBlockable(recipient),
@@ -256,8 +269,9 @@ sealed class ConversationSettingsViewModel(
 
   private class GroupSettingsViewModel(
     private val groupId: GroupId,
+    private val callMessageIds: LongArray,
     private val repository: ConversationSettingsRepository
-  ) : ConversationSettingsViewModel(repository, SpecificSettingsState.GroupSettingsState(groupId)) {
+  ) : ConversationSettingsViewModel(callMessageIds, repository, SpecificSettingsState.GroupSettingsState(groupId)) {
 
     private val liveGroup = LiveGroup(groupId)
 
@@ -271,12 +285,13 @@ sealed class ConversationSettingsViewModel(
         state.copy(
           recipient = recipient,
           buttonStripState = ButtonStripPreference.State(
+            isMessageAvailable = callMessageIds.isNotEmpty(),
             isVideoAvailable = recipient.isPushV2Group && !recipient.isBlocked && isActive,
             isAudioAvailable = false,
             isAudioSecure = recipient.isPushV2Group,
             isMuted = recipient.isMuted,
             isMuteAvailable = true,
-            isSearchAvailable = true,
+            isSearchAvailable = callMessageIds.isEmpty(),
             isAddToStoryAvailable = recipient.isPushV2Group && !recipient.isBlocked && isActive && !SignalStore.storyValues().isFeatureDisabled
           ),
           canModifyBlockedState = RecipientUtil.isBlockable(recipient),
@@ -479,6 +494,7 @@ sealed class ConversationSettingsViewModel(
   class Factory(
     private val recipientId: RecipientId? = null,
     private val groupId: GroupId? = null,
+    private val callMessageIds: LongArray,
     private val repository: ConversationSettingsRepository
   ) : ViewModelProvider.Factory {
 
@@ -486,8 +502,8 @@ sealed class ConversationSettingsViewModel(
       return requireNotNull(
         modelClass.cast(
           when {
-            recipientId != null -> RecipientSettingsViewModel(recipientId, repository)
-            groupId != null -> GroupSettingsViewModel(groupId, repository)
+            recipientId != null -> RecipientSettingsViewModel(recipientId, callMessageIds, repository)
+            groupId != null -> GroupSettingsViewModel(groupId, callMessageIds, repository)
             else -> error("One of RecipientId or GroupId required.")
           }
         )

@@ -8,6 +8,8 @@ import androidx.annotation.VisibleForTesting;
 import androidx.annotation.WorkerThread;
 
 import org.signal.core.util.logging.Log;
+import org.thoughtcrime.securesms.jobmanager.impl.BackoffUtil;
+import org.thoughtcrime.securesms.util.FeatureFlags;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -24,10 +26,10 @@ import static androidx.annotation.VisibleForTesting.PACKAGE_PRIVATE;
  * often they should be retried, and how long they should be retried for.
  *
  * Never rely on a specific instance of this class being run. It can be created and destroyed as the
- * job is retried. State that you want to save is persisted to a {@link Data} object in
+ * job is retried. State that you want to save is persisted to a {@link JsonJobData} object in
  * {@link #serialize()}. Your job is then recreated using a {@link Factory} that you register in
  * {@link JobManager.Configuration.Builder#setJobFactories(Map)}, which is given the saved
- * {@link Data} bundle.
+ * {@link JsonJobData} bundle.
  */
 public abstract class Job {
 
@@ -62,11 +64,11 @@ public abstract class Job {
     return nextRunAttemptTime;
   }
 
-  public final @Nullable Data getInputData() {
+  public final @Nullable byte[] getInputData() {
     return parameters.getInputData();
   }
 
-  public final @NonNull Data requireInputData() {
+  public final @NonNull byte[] requireInputData() {
     return Objects.requireNonNull(parameters.getInputData());
   }
 
@@ -92,6 +94,12 @@ public abstract class Job {
   final void cancel() {
     this.canceled = true;
   }
+
+  /** Provides a default exponential backoff given the current run attempt. */
+  protected final long defaultBackoff() {
+    return BackoffUtil.exponentialBackoff(runAttempt + 1, FeatureFlags.getDefaultMaxBackoff());
+  }
+
 
   @WorkerThread
   final void onSubmit() {
@@ -126,7 +134,7 @@ public abstract class Job {
   /**
    * Serialize your job state so that it can be recreated in the future.
    */
-  public abstract @NonNull Data serialize();
+  public abstract @Nullable byte[] serialize();
 
   /**
    * Returns the key that can be used to find the relevant factory needed to create your job.
@@ -146,7 +154,7 @@ public abstract class Job {
   public abstract void onFailure();
 
   public interface Factory<T extends Job> {
-    @NonNull T create(@NonNull Parameters parameters, @NonNull Data data);
+    @NonNull T create(@NonNull Parameters parameters, @Nullable byte[] serializedData);
   }
 
   public static final class Result {
@@ -158,10 +166,10 @@ public abstract class Job {
 
     private final ResultType       resultType;
     private final RuntimeException runtimeException;
-    private final Data             outputData;
+    private final byte[]           outputData;
     private final long             backoffInterval;
 
-    private Result(@NonNull ResultType resultType, @Nullable RuntimeException runtimeException, @Nullable Data outputData, long backoffInterval) {
+    private Result(@NonNull ResultType resultType, @Nullable RuntimeException runtimeException, @Nullable byte[] outputData, long backoffInterval) {
       this.resultType       = resultType;
       this.runtimeException = runtimeException;
       this.outputData       = outputData;
@@ -174,7 +182,7 @@ public abstract class Job {
     }
 
     /** Job completed successfully and wants to provide some output data. */
-    public static Result success(@Nullable Data outputData) {
+    public static Result success(@Nullable byte[] outputData) {
       return new Result(ResultType.SUCCESS, null, outputData, INVALID_BACKOFF);
     }
 
@@ -196,7 +204,6 @@ public abstract class Job {
       return new Result(ResultType.FAILURE, runtimeException, null, INVALID_BACKOFF);
     }
 
-    @VisibleForTesting(otherwise = PACKAGE_PRIVATE)
     public boolean isSuccess() {
       return resultType == ResultType.SUCCESS;
     }
@@ -215,7 +222,7 @@ public abstract class Job {
       return runtimeException;
     }
 
-    @Nullable Data getOutputData() {
+    @Nullable byte[] getOutputData() {
       return outputData;
     }
 
@@ -259,7 +266,7 @@ public abstract class Job {
     private final int          maxInstancesForQueue;
     private final String       queue;
     private final List<String> constraintKeys;
-    private final Data         inputData;
+    private final byte[]       inputData;
     private final boolean      memoryOnly;
 
     private Parameters(@NonNull String id,
@@ -270,7 +277,7 @@ public abstract class Job {
                        int maxInstancesForQueue,
                        @Nullable String queue,
                        @NonNull List<String> constraintKeys,
-                       @Nullable Data inputData,
+                       @Nullable byte[] inputData,
                        boolean memoryOnly)
     {
       this.id                     = id;
@@ -317,7 +324,7 @@ public abstract class Job {
       return constraintKeys;
     }
 
-    @Nullable Data getInputData() {
+    @Nullable byte[] getInputData() {
       return inputData;
     }
 
@@ -339,7 +346,7 @@ public abstract class Job {
       private int          maxInstancesForQueue;
       private String       queue;
       private List<String> constraintKeys;
-      private Data         inputData;
+      private byte[]       inputData;
       private boolean      memoryOnly;
 
       public Builder() {
@@ -358,7 +365,7 @@ public abstract class Job {
                       int maxInstancesForQueue,
                       @Nullable String queue,
                       @NonNull List<String> constraintKeys,
-                      @Nullable Data inputData,
+                      @Nullable byte[] inputData,
                       boolean memoryOnly)
       {
         this.id                     = id;
@@ -465,10 +472,10 @@ public abstract class Job {
       }
 
       /**
-       * Sets the input data that will be made availabe to the job when it is run.
+       * Sets the input data that will be made available to the job when it is run.
        * Should only be set by {@link JobController}.
        */
-      @NonNull Builder setInputData(@Nullable Data inputData) {
+      @NonNull Builder setInputData(@Nullable byte[] inputData) {
         this.inputData = inputData;
         return this;
       }

@@ -26,14 +26,14 @@
         app:layout_constraintTop_toTopOf="parent"
         tools:visibility="visible">
 
-        <ImageView
+        <androidx.appcompat.widget.AppCompatImageView
             android:id="@+id/conversation_list_item_unchecked"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone"
             app:srcCompat="@drawable/multiselect_empty_ring" />
 
-        <ImageView
+        <androidx.appcompat.widget.AppCompatImageView
             android:id="@+id/conversation_list_item_checked"
             android:layout_width="24dp"
             android:layout_height="24dp"
@@ -87,10 +87,9 @@
         android:visibility="gone"
         app:layout_constraintStart_toStartOf="@id/conversation_list_item_name"
         app:layout_constraintTop_toBottomOf="@id/conversation_list_item_name"
-        app:useSmallIcon="true"
         tools:visibility="visible" />
 
-    <org.thoughtcrime.securesms.components.emoji.SimpleEmojiTextView
+    <org.thoughtcrime.securesms.components.emoji.EmojiTextView
         android:id="@+id/conversation_list_item_summary"
         style="@style/Signal.Text.BodyMedium"
         android:layout_width="0dp"
@@ -100,6 +99,7 @@
         android:lines="2"
         android:maxLines="2"
         android:textColor="@color/signal_text_secondary"
+        app:emoji_renderSpoilers="true"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toStartOf="@id/conversation_list_item_status_container"
         app:layout_constraintStart_toEndOf="@id/conversation_list_item_alert"

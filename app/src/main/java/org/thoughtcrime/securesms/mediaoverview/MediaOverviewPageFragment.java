@@ -211,9 +211,11 @@ public final class MediaOverviewPageFragment extends Fragment
   @Override
   public void onDestroy() {
     super.onDestroy();
-    int childCount = recyclerView.getChildCount();
-    for (int i = 0; i < childCount; i++) {
-      adapter.detach(recyclerView.getChildViewHolder(recyclerView.getChildAt(i)));
+    if (recyclerView != null) {
+      int childCount = recyclerView.getChildCount();
+      for (int i = 0; i < childCount; i++) {
+        adapter.detach(recyclerView.getChildViewHolder(recyclerView.getChildAt(i)));
+      }
     }
   }
 
@@ -261,7 +263,8 @@ public final class MediaOverviewPageFragment extends Fragment
               DimensionUnit.DP.toDp(12),
               DimensionUnit.DP.toDp(12),
               DimensionUnit.DP.toDp(12)
-          ));
+          ),
+          false);
       view.setTransitionName(MediaPreviewV2Activity.SHARED_ELEMENT_TRANSITION_NAME);
       ActivityOptions options = ActivityOptions.makeSceneTransitionAnimation(requireActivity(), view, MediaPreviewV2Activity.SHARED_ELEMENT_TRANSITION_NAME);
       context.startActivity(MediaIntentFactory.create(context, args), options.toBundle());

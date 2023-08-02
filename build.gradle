@@ -1,5 +1,7 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 buildscript {
-    ext.kotlin_version = '1.7.20'
+    ext.kotlin_version = '1.8.10'
     repositories {
         google()
         mavenCentral()
@@ -17,10 +19,9 @@ buildscript {
         }
     }
     dependencies {
-        classpath 'com.android.tools:r8:3.3.75'
-        classpath 'com.android.tools.build:gradle:7.4.0'
+        classpath 'com.android.tools.build:gradle:8.0.2'
         classpath 'androidx.navigation:navigation-safe-args-gradle-plugin:2.5.3'
-        classpath 'com.google.protobuf:protobuf-gradle-plugin:0.8.17'
+        classpath 'com.google.protobuf:protobuf-gradle-plugin:0.9.0'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         classpath libs.ktlint
         classpath 'app.cash.exhaustive:exhaustive-gradle:0.1.1'
@@ -31,11 +32,21 @@ buildscript {
             exclude group: 'com.squareup.wire', module: 'wire-grpc-server-generator'
             exclude group: 'io.outfoxx', module: 'swiftpoet'
         }
+        classpath 'androidx.benchmark:benchmark-gradle-plugin:1.1.0-beta04'
     }
 }
 
 wrapper {
     distributionType = Wrapper.DistributionType.ALL
+}
+
+allprojects {
+    // Needed because otherwise the kapt task defaults to jvmTarget 17, which "poisons the well" and requires us to bump up too
+    tasks.withType(KotlinCompile).configureEach {
+        kotlinOptions {
+            jvmTarget = "11"
+        }
+    }
 }
 
 subprojects {
@@ -51,7 +62,7 @@ subprojects {
         }
     }
 
-    if (project.name != "Signal-Android" && project.name != "libsignal-service" && project.name != "lintchecks" && !project.name.endsWith("-app")) {
+    if (project.name != "Signal-Android" && project.name != "libsignal-service" && project.name != "lintchecks" && !project.name.endsWith("-app") && project.name != "benchmark") {
         task qa {
             group 'Verification'
             description 'Quality Assurance. Run before pushing'
@@ -78,7 +89,8 @@ task qa {
             'Signal-Android:ktlintCheck',
             ':libsignal-service:test',
             ':libsignal-service:ktlintCheck',
-            ':Signal-Android:assemblePlayProdRelease'
+            ':Signal-Android:assemblePlayProdRelease',
+            ':Signal-Android:compilePlayProdInstrumentationAndroidTestSources'
 }
 
 task clean(type: Delete) {

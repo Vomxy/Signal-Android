@@ -19,20 +19,23 @@ import org.thoughtcrime.securesms.database.AttachmentTable;
 import org.thoughtcrime.securesms.database.SignalDatabase;
 import org.thoughtcrime.securesms.dependencies.ApplicationDependencies;
 import org.thoughtcrime.securesms.events.PartProgressEvent;
-import org.thoughtcrime.securesms.jobmanager.Data;
+import org.thoughtcrime.securesms.jobmanager.JsonJobData;
 import org.thoughtcrime.securesms.jobmanager.Job;
 import org.thoughtcrime.securesms.jobmanager.impl.NetworkConstraint;
 import org.thoughtcrime.securesms.mms.PartAuthority;
 import org.thoughtcrime.securesms.net.NotPushRegisteredException;
 import org.thoughtcrime.securesms.recipients.Recipient;
 import org.thoughtcrime.securesms.service.NotificationController;
+import org.thoughtcrime.securesms.util.FeatureFlags;
 import org.thoughtcrime.securesms.util.MediaUtil;
 import org.whispersystems.signalservice.api.SignalServiceMessageSender;
+import org.whispersystems.signalservice.api.crypto.AttachmentCipherOutputStream;
 import org.whispersystems.signalservice.api.messages.SignalServiceAttachment;
 import org.whispersystems.signalservice.api.messages.SignalServiceAttachmentPointer;
 import org.whispersystems.signalservice.api.messages.SignalServiceAttachmentStream;
 import org.whispersystems.signalservice.api.push.exceptions.NonSuccessfulResumableUploadResponseCodeException;
 import org.whispersystems.signalservice.api.push.exceptions.ResumeLocationInvalidException;
+import org.whispersystems.signalservice.internal.crypto.PaddingInputStream;
 import org.whispersystems.signalservice.internal.push.http.ResumableUploadSpec;
 
 import java.io.IOException;
@@ -64,6 +67,12 @@ public final class AttachmentUploadJob extends BaseJob {
    */
   private static final int FOREGROUND_LIMIT = 10 * 1024 * 1024;
 
+  public static long getMaxPlaintextSize() {
+    long maxCipherTextSize = FeatureFlags.maxAttachmentSizeBytes();
+    long maxPaddedSize     = AttachmentCipherOutputStream.getPlaintextLength(maxCipherTextSize);
+    return PaddingInputStream.getMaxUnpaddedSize(maxPaddedSize);
+  }
+
   private final AttachmentId attachmentId;
 
   private boolean forceV2;
@@ -85,11 +94,11 @@ public final class AttachmentUploadJob extends BaseJob {
   }
 
   @Override
-  public @NonNull Data serialize() {
-    return new Data.Builder().putLong(KEY_ROW_ID, attachmentId.getRowId())
-                             .putLong(KEY_UNIQUE_ID, attachmentId.getUniqueId())
-                             .putBoolean(KEY_FORCE_V2, forceV2)
-                             .build();
+  public @Nullable byte[] serialize() {
+    return new JsonJobData.Builder().putLong(KEY_ROW_ID, attachmentId.getRowId())
+                                    .putLong(KEY_UNIQUE_ID, attachmentId.getUniqueId())
+                                    .putBoolean(KEY_FORCE_V2, forceV2)
+                                    .serialize();
   }
 
   @Override
@@ -108,14 +117,14 @@ public final class AttachmentUploadJob extends BaseJob {
       throw new NotPushRegisteredException();
     }
 
-    Data inputData = getInputData();
+    JsonJobData inputData = JsonJobData.deserialize(getInputData());
 
     ResumableUploadSpec resumableUploadSpec;
 
     if (forceV2) {
       Log.d(TAG, "Forcing utilization of V2");
       resumableUploadSpec = null;
-    } else if (inputData != null && inputData.hasString(ResumableUploadSpecJob.KEY_RESUME_SPEC)) {
+    } else if (inputData.hasString(ResumableUploadSpecJob.KEY_RESUME_SPEC)) {
       Log.d(TAG, "Using attachments V3");
       resumableUploadSpec = ResumableUploadSpec.deserialize(inputData.getString(ResumableUploadSpecJob.KEY_RESUME_SPEC));
     } else {
@@ -269,7 +278,9 @@ public final class AttachmentUploadJob extends BaseJob {
 
   public static final class Factory implements Job.Factory<AttachmentUploadJob> {
     @Override
-    public @NonNull AttachmentUploadJob create(@NonNull Parameters parameters, @NonNull org.thoughtcrime.securesms.jobmanager.Data data) {
+    public @NonNull AttachmentUploadJob create(@NonNull Parameters parameters, @Nullable byte[] serializedData) {
+      JsonJobData data = JsonJobData.deserialize(serializedData);
+
       return new AttachmentUploadJob(parameters, new AttachmentId(data.getLong(KEY_ROW_ID), data.getLong(KEY_UNIQUE_ID)), data.getBooleanOrDefault(KEY_FORCE_V2, false));
     }
   }

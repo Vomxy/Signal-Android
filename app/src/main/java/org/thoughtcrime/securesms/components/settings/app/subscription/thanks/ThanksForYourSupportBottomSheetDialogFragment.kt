@@ -13,7 +13,7 @@ import androidx.navigation.fragment.findNavController
 import com.airbnb.lottie.LottieAnimationView
 import com.airbnb.lottie.LottieDrawable
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.switchmaterial.SwitchMaterial
+import com.google.android.material.materialswitch.MaterialSwitch
 import io.reactivex.rxjava3.kotlin.subscribeBy
 import org.signal.core.util.logging.Log
 import org.thoughtcrime.securesms.R
@@ -31,7 +31,7 @@ class ThanksForYourSupportBottomSheetDialogFragment : FixedRoundedCornerBottomSh
 
   override val peekHeightPercentage: Float = 1f
 
-  private lateinit var switch: SwitchMaterial
+  private lateinit var switch: MaterialSwitch
   private lateinit var heading: TextView
 
   private lateinit var badgeRepository: BadgeRepository
@@ -128,6 +128,7 @@ class ThanksForYourSupportBottomSheetDialogFragment : FixedRoundedCornerBottomSh
   }
 
   override fun onDismiss(dialog: DialogInterface) {
+    super.onDismiss(dialog)
     val controlChecked = switch.isChecked
     val args = ThanksForYourSupportBottomSheetDialogFragmentArgs.fromBundle(requireArguments())
 

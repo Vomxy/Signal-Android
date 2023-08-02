@@ -7,6 +7,7 @@ import androidx.appcompat.widget.Toolbar
 import androidx.fragment.app.setFragmentResult
 import androidx.fragment.app.viewModels
 import androidx.navigation.fragment.findNavController
+import org.signal.core.util.concurrent.LifecycleDisposable
 import org.thoughtcrime.securesms.R
 import org.thoughtcrime.securesms.components.ViewBinderDelegate
 import org.thoughtcrime.securesms.components.settings.DSLConfiguration
@@ -14,7 +15,6 @@ import org.thoughtcrime.securesms.components.settings.DSLSettingsFragment
 import org.thoughtcrime.securesms.components.settings.configure
 import org.thoughtcrime.securesms.databinding.StoriesCreateWithRecipientsFragmentBinding
 import org.thoughtcrime.securesms.recipients.RecipientId
-import org.thoughtcrime.securesms.util.LifecycleDisposable
 import org.thoughtcrime.securesms.util.Material3OnScrollHelper
 import org.thoughtcrime.securesms.util.ViewUtil
 import org.thoughtcrime.securesms.util.adapter.mapping.LayoutFactory
@@ -76,7 +76,13 @@ class CreateStoryWithViewersFragment : DSLSettingsFragment(
       }
     }
 
-    Material3OnScrollHelper(requireContext(), { requireListener<Callback>().setStatusBarColor(it) }, listOf(binding.toolbar)).attach(binding.appBarLayout)
+    Material3OnScrollHelper(
+      context = requireContext(),
+      setStatusBarColor = { requireListener<Callback>().setStatusBarColor(it) },
+      getStatusBarColor = { requireListener<Callback>().getStatusBarColor() },
+      views = listOf(binding.toolbar),
+      lifecycleOwner = viewLifecycleOwner
+    ).attach(binding.appBarLayout)
     ViewUtil.focusAndShowKeyboard(binding.nameField.editText)
   }
 
@@ -135,6 +141,7 @@ class CreateStoryWithViewersFragment : DSLSettingsFragment(
 
   interface Callback {
     fun setStatusBarColor(@ColorInt color: Int)
+    fun getStatusBarColor(): Int
     fun onDone(recipientId: RecipientId)
   }
 }

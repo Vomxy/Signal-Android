@@ -1,6 +1,7 @@
 package org.thoughtcrime.securesms.jobs;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -8,7 +9,7 @@ import org.signal.core.util.logging.Log;
 import org.thoughtcrime.securesms.database.SignalDatabase;
 import org.thoughtcrime.securesms.database.model.EmojiSearchData;
 import org.thoughtcrime.securesms.dependencies.ApplicationDependencies;
-import org.thoughtcrime.securesms.jobmanager.Data;
+import org.thoughtcrime.securesms.jobmanager.JsonJobData;
 import org.thoughtcrime.securesms.jobmanager.Job;
 import org.thoughtcrime.securesms.jobmanager.impl.NetworkConstraint;
 import org.thoughtcrime.securesms.keyvalue.EmojiValues;
@@ -74,8 +75,8 @@ public final class EmojiSearchIndexDownloadJob extends BaseJob {
   }
 
   @Override
-  public @NonNull Data serialize() {
-    return Data.EMPTY;
+  public @Nullable byte[] serialize() {
+    return null;
   }
 
   @Override
@@ -101,6 +102,10 @@ public final class EmojiSearchIndexDownloadJob extends BaseJob {
     Log.i(TAG, "Need to get a new search index. Downloading version: " + manifest.getVersion() + ", language: " + remoteLanguage);
 
     List<EmojiSearchData> searchIndex = downloadSearchIndex(manifest.getVersion(), remoteLanguage);
+
+    if (searchIndex.isEmpty()) {
+      throw new IOException("Emoji search data is empty");
+    }
 
     SignalDatabase.emojiSearch().setSearchIndex(searchIndex);
     SignalStore.emojiValues().onSearchIndexUpdated(manifest.getVersion(), remoteLanguage);
@@ -181,7 +186,7 @@ public final class EmojiSearchIndexDownloadJob extends BaseJob {
 
   public static final class Factory implements Job.Factory<EmojiSearchIndexDownloadJob> {
     @Override
-    public @NonNull EmojiSearchIndexDownloadJob create(@NonNull Parameters parameters, @NonNull Data data) {
+    public @NonNull EmojiSearchIndexDownloadJob create(@NonNull Parameters parameters, @Nullable byte[] serializedData) {
       return new EmojiSearchIndexDownloadJob(parameters);
     }
   }

@@ -11,16 +11,13 @@ object AppCapabilities {
   @JvmStatic
   fun getCapabilities(storageCapable: Boolean): AccountAttributes.Capabilities {
     return AccountAttributes.Capabilities(
-      isUuid = false,
-      isGv2 = true,
-      isStorage = storageCapable,
-      isGv1Migration = true,
-      isSenderKey = true,
-      isAnnouncementGroup = true,
-      isChangeNumber = true,
-      isStories = true,
-      isGiftBadges = true,
-      isPnp = FeatureFlags.phoneNumberPrivacy(),
+      storage = storageCapable,
+      senderKey = true,
+      announcementGroup = true,
+      changeNumber = true,
+      stories = true,
+      giftBadges = true,
+      pni = FeatureFlags.phoneNumberPrivacy(),
       paymentActivation = true
     )
   }

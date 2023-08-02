@@ -71,7 +71,7 @@ public class PaymentRecipientSelectionFragment extends LoggingFragment implement
   }
 
   @Override
-  public void onBeforeContactSelected(@NonNull Optional<RecipientId> recipientId, @Nullable String number, @NonNull Consumer<Boolean> callback) {
+  public void onBeforeContactSelected(boolean isFromUnknownSearchKey, @NonNull Optional<RecipientId> recipientId, @Nullable String number, @NonNull Consumer<Boolean> callback) {
     if (recipientId.isPresent()) {
       SimpleTask.run(getViewLifecycleOwner().getLifecycle(),
                      () -> Recipient.resolved(recipientId.get()),
@@ -118,7 +118,7 @@ public class PaymentRecipientSelectionFragment extends LoggingFragment implement
 
   private void openConversation(@NonNull RecipientId recipientId) {
     SimpleTask.run(getViewLifecycleOwner().getLifecycle(),
-                   () -> SignalDatabase.threads().getThreadIdIfExistsFor(recipientId),
-                   threadId -> startActivity(ConversationIntents.createBuilder(requireContext(), recipientId, threadId).build()));
+                   () -> SignalDatabase.threads().getOrCreateThreadIdFor(Recipient.resolved(recipientId)),
+                   threadId -> startActivity(ConversationIntents.createBuilderSync(requireContext(), recipientId, threadId).build()));
   }
 }

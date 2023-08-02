@@ -28,6 +28,7 @@ import com.bumptech.glide.request.RequestListener;
 import com.bumptech.glide.request.RequestOptions;
 
 import org.signal.core.util.logging.Log;
+import org.signal.glide.transforms.SignalDownsampleStrategy;
 import org.thoughtcrime.securesms.R;
 import org.thoughtcrime.securesms.blurhash.BlurHash;
 import org.thoughtcrime.securesms.database.AttachmentTable;
@@ -46,6 +47,7 @@ import org.thoughtcrime.securesms.util.concurrent.ListenableFuture;
 import org.thoughtcrime.securesms.util.concurrent.SettableFuture;
 import org.thoughtcrime.securesms.util.views.Stub;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Locale;
 import java.util.Objects;
@@ -290,12 +292,20 @@ public class ThumbnailView extends FrameLayout {
   }
 
   public void setBounds(int minWidth, int maxWidth, int minHeight, int maxHeight) {
+    final int oldMinWidth  = bounds[MIN_WIDTH];
+    final int oldMaxWidth  = bounds[MAX_WIDTH];
+    final int oldMinHeight = bounds[MIN_HEIGHT];
+    final int oldMaxHeight = bounds[MAX_HEIGHT];
+
     bounds[MIN_WIDTH]  = minWidth;
     bounds[MAX_WIDTH]  = maxWidth;
     bounds[MIN_HEIGHT] = minHeight;
     bounds[MAX_HEIGHT] = maxHeight;
 
-    forceLayout();
+    if (oldMinWidth != minWidth || oldMaxWidth != maxWidth || oldMinHeight != minHeight || oldMaxHeight != maxHeight) {
+      Log.d(TAG, "setBounds: update {minW" + minWidth + ",maxW" + maxWidth + ",minH" + minHeight + ",maxH" + maxHeight + "}");
+      forceLayout();
+    }
   }
 
   public void setImageDrawable(@NonNull GlideRequests glideRequests, @Nullable Drawable drawable) {
@@ -369,7 +379,7 @@ public class ThumbnailView extends FrameLayout {
       this.playOverlay.setVisibility(View.GONE);
     }
 
-    if (Util.equals(slide, this.slide)) {
+    if (hasSameContents(this.slide, slide)) {
       Log.i(TAG, "Not re-loading slide " + slide.asAttachment().getUri());
       return new SettableFuture<>(false);
     }
@@ -446,15 +456,14 @@ public class ThumbnailView extends FrameLayout {
 
     GlideRequest<Drawable> request = glideRequests.load(new DecryptableUri(uri))
                                                   .diskCacheStrategy(DiskCacheStrategy.NONE)
+                                                  .downsample(SignalDownsampleStrategy.CENTER_OUTSIDE_NO_UPSCALE)
                                                   .listener(listener);
 
     if (animate) {
       request = request.transition(withCrossFade());
     }
 
-    if (width > 0 && height > 0) {
-      request = request.override(width, height);
-    }
+    request = override(request, width, height);
 
     GlideDrawableListeningTarget target                 = new GlideDrawableListeningTarget(image, future);
     Request                      previousRequest        = target.getRequest();
@@ -480,16 +489,25 @@ public class ThumbnailView extends FrameLayout {
     GlideRequest<Drawable> request = glideRequests.load(model)
                                                   .diskCacheStrategy(DiskCacheStrategy.NONE)
                                                   .placeholder(model.getPlaceholder())
+                                                  .downsample(SignalDownsampleStrategy.CENTER_OUTSIDE_NO_UPSCALE)
                                                   .transition(withCrossFade());
 
-    if (width > 0 && height > 0) {
-      request = request.override(width, height);
-    }
+    request = override(request, width, height);
 
     request.into(new GlideDrawableListeningTarget(image, future));
     blurHash.setImageDrawable(null);
 
     return future;
+  }
+
+  private <T> GlideRequest<T> override(@NonNull GlideRequest<T> request, int width, int height) {
+    if (width > 0 && height > 0) {
+      Log.d(TAG, "override: apply w" + width + "xh" + height);
+      return request.override(width, height);
+    } else {
+      Log.d(TAG, "override: skip w" + width + "xh" + height);
+      return request;
+    }
   }
 
   public void setThumbnailClickListener(SlideClickListener listener) {
@@ -540,6 +558,7 @@ public class ThumbnailView extends FrameLayout {
   private GlideRequest<Drawable> buildThumbnailGlideRequest(@NonNull GlideRequests glideRequests, @NonNull Slide slide) {
     GlideRequest<Drawable> request = applySizing(glideRequests.load(new DecryptableUri(Objects.requireNonNull(slide.getUri())))
                                                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                                                    .downsample(SignalDownsampleStrategy.CENTER_OUTSIDE_NO_UPSCALE)
                                                     .transition(withCrossFade()));
 
     boolean doNotShowMissingThumbnailImage = Build.VERSION.SDK_INT < 23;
@@ -572,7 +591,7 @@ public class ThumbnailView extends FrameLayout {
       size[HEIGHT] = getDefaultHeight();
     }
 
-    return request.override(size[WIDTH], size[HEIGHT]);
+    return override(request, size[WIDTH], size[HEIGHT]);
   }
 
   private int getDefaultWidth() {
@@ -589,6 +608,20 @@ public class ThumbnailView extends FrameLayout {
       return Math.max(params.height, 0);
     }
     return 0;
+  }
+
+  private static boolean hasSameContents(@Nullable Slide slide, @Nullable Slide other) {
+    if (Util.equals(slide, other)) {
+
+      if (slide != null && other != null) {
+        byte[] digestLeft = slide.asAttachment().getDigest();
+        byte[] digestRight = other.asAttachment().getDigest();
+
+        return Arrays.equals(digestLeft, digestRight);
+      }
+    }
+
+    return false;
   }
 
   public interface ThumbnailRequestListener extends RequestListener<Drawable> {

@@ -31,7 +31,6 @@ import org.thoughtcrime.securesms.fonts.TextToScript
 import org.thoughtcrime.securesms.fonts.TypefaceCache
 import org.thoughtcrime.securesms.mms.DecryptableStreamUriLoader
 import org.thoughtcrime.securesms.mms.GlideApp
-import org.thoughtcrime.securesms.recipients.Recipient
 import org.thoughtcrime.securesms.recipients.RecipientId
 import org.thoughtcrime.securesms.util.Base64
 import org.thoughtcrime.securesms.util.ParcelUtil
@@ -94,7 +93,7 @@ data class StoryTextPostModel(
       return parseFrom(
         body = messageRecord.body,
         storySentAtMillis = messageRecord.timestamp,
-        storyAuthor = if (messageRecord.isOutgoing) Recipient.self().id else messageRecord.individualRecipient.id,
+        storyAuthor = messageRecord.fromRecipient.id,
         bodyRanges = messageRecord.messageRanges
       )
     }
@@ -141,7 +140,7 @@ data class StoryTextPostModel(
       val useLargeThumbnail = source.text.isBlank()
 
       view.setTypeface(typeface)
-      view.bindFromStoryTextPost(source.storyTextPost, source.bodyRanges)
+      view.bindFromStoryTextPost(source.storySentAtMillis, source.storyTextPost, source.bodyRanges)
       view.bindLinkPreview(linkPreview, useLargeThumbnail, loadThumbnail = false)
       view.postAdjustLinkPreviewTranslationY()
 

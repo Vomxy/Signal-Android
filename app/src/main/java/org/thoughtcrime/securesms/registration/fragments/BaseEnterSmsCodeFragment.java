@@ -28,8 +28,9 @@ import org.thoughtcrime.securesms.components.registration.VerificationCodeView;
 import org.thoughtcrime.securesms.components.registration.VerificationPinKeyboard;
 import org.thoughtcrime.securesms.registration.ReceivedSmsEvent;
 import org.thoughtcrime.securesms.registration.VerifyAccountRepository;
+import org.thoughtcrime.securesms.registration.VerifyResponseProcessor;
 import org.thoughtcrime.securesms.registration.viewmodel.BaseRegistrationViewModel;
-import org.thoughtcrime.securesms.util.LifecycleDisposable;
+import org.signal.core.util.concurrent.LifecycleDisposable;
 import org.thoughtcrime.securesms.util.ViewUtil;
 import org.thoughtcrime.securesms.util.concurrent.AssertedSuccessListener;
 import org.thoughtcrime.securesms.util.dualsim.MccMncProducer;
@@ -163,7 +164,7 @@ public abstract class BaseEnterSmsCodeFragment<ViewModel extends BaseRegistratio
 
       Disposable verify = viewModel.verifyCodeWithoutRegistrationLock(code)
                                    .observeOn(AndroidSchedulers.mainThread())
-                                   .subscribe(processor -> {
+                                   .subscribe((VerifyResponseProcessor processor) -> {
                                      if (!processor.hasResult()) {
                                        Log.w(TAG, "post verify: ", processor.getError());
                                      }
@@ -171,11 +172,9 @@ public abstract class BaseEnterSmsCodeFragment<ViewModel extends BaseRegistratio
                                        handleSuccessfulVerify();
                                      } else if (processor.rateLimit()) {
                                        handleRateLimited();
-                                     } else if (processor.registrationLock() && !processor.isKbsLocked()) {
+                                     } else if (processor.registrationLock() && !processor.isRegistrationLockPresentAndSvrExhausted()) {
                                        LockedException lockedException = processor.getLockedException();
                                        handleRegistrationLock(lockedException.getTimeRemaining());
-                                     } else if (processor.isKbsLocked()) {
-                                       handleKbsAccountLocked();
                                      } else if (processor.authorizationFailed()) {
                                        handleIncorrectCodeError();
                                      } else {
@@ -226,7 +225,7 @@ public abstract class BaseEnterSmsCodeFragment<ViewModel extends BaseRegistratio
     });
   }
 
-  protected void handleKbsAccountLocked() {
+  protected void handleSvrAccountLocked() {
     navigateToKbsAccountLocked();
   }
 
@@ -314,6 +313,7 @@ public abstract class BaseEnterSmsCodeFragment<ViewModel extends BaseRegistratio
 
   private void handlePhoneCallRequest() {
     showConfirmNumberDialogIfTranslated(requireContext(),
+                                        R.string.RegistrationActivity_phone_number_verification_dialog_title,
                                         R.string.RegistrationActivity_you_will_receive_a_call_to_verify_this_number,
                                         viewModel.getNumber().getE164Number(),
                                         () -> handleCodeCallRequestAfterConfirm(VerifyAccountRepository.Mode.PHONE_CALL),
@@ -322,7 +322,8 @@ public abstract class BaseEnterSmsCodeFragment<ViewModel extends BaseRegistratio
 
   private void handleSmsRequest() {
     showConfirmNumberDialogIfTranslated(requireContext(),
-                                        R.string.RegistrationActivity_a_verification_code_will_be_sent_to,
+                                        R.string.RegistrationActivity_phone_number_verification_dialog_title,
+                                        R.string.RegistrationActivity_a_verification_code_will_be_sent_to_this_number,
                                         viewModel.getNumber().getE164Number(),
                                         () -> handleCodeCallRequestAfterConfirm(VerifyAccountRepository.Mode.SMS_WITH_LISTENER),
                                         this::returnToPhoneEntryScreen);
@@ -388,12 +389,16 @@ public abstract class BaseEnterSmsCodeFragment<ViewModel extends BaseRegistratio
                                   .observeOn(AndroidSchedulers.mainThread())
                                   .subscribe(processor -> {
                                     if (!processor.hasResult()) {
+                                      Log.d(TAG, "Network error.");
                                       returnToPhoneEntryScreen();
                                     } else if (processor.isInvalidSession()) {
+                                      Log.d(TAG, "Registration session is invalid.");
                                       returnToPhoneEntryScreen();
                                     } else if (processor.cannotSubmitVerificationAttempt()) {
+                                      Log.d(TAG, "Cannot submit any more verification attempts.");
                                       returnToPhoneEntryScreen();
-                                    } else if (!processor.canSubmitProofImmediately()) {
+                                    } else if (processor.mustWaitToSubmitProof()) {
+                                      Log.d(TAG, "Blocked from submitting proof at this time.");
                                       handleRateLimited();
                                     }
                                     // else session state is valid and server is ready to accept code

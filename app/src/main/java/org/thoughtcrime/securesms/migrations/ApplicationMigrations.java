@@ -12,7 +12,6 @@ import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
 import org.signal.core.util.logging.Log;
 import org.thoughtcrime.securesms.jobmanager.JobManager;
-import org.thoughtcrime.securesms.jobs.RefreshAttributesJob;
 import org.thoughtcrime.securesms.keyvalue.SignalStore;
 import org.thoughtcrime.securesms.stickers.BlessedPacks;
 import org.thoughtcrime.securesms.util.TextSecurePreferences;
@@ -97,7 +96,7 @@ public class ApplicationMigrations {
     static final int JUMBOMOJI_DOWNLOAD            = 52;
     static final int FIX_EMOJI_QUALITY             = 53;
     static final int CHANGE_NUMBER_CAPABILITY_4    = 54;
-    static final int KBS_MIGRATION                 = 55;
+    //static final int KBS_MIGRATION               = 55;
     static final int PNI_IDENTITY                  = 56;
     static final int PNI_IDENTITY_2                = 57;
     static final int PNI_IDENTITY_3                = 58;
@@ -107,7 +106,7 @@ public class ApplicationMigrations {
     static final int REFRESH_EXPIRING_CREDENTIAL   = 62;
     static final int EMOJI_SEARCH_INDEX_10         = 63;
     static final int REFRESH_PNI_REGISTRATION_ID   = 64;
-    static final int KBS_MIGRATION_2               = 65;
+    //static final int KBS_MIGRATION_2             = 65;
     static final int PNI_2                         = 66;
     static final int SYSTEM_NAME_SYNC              = 67;
     static final int STORY_VIEWED_STATE            = 68;
@@ -123,9 +122,23 @@ public class ApplicationMigrations {
     static final int SYSTEM_NAME_RESYNC            = 78;
     static final int RECOVERY_PASSWORD_SYNC        = 79;
     static final int DECRYPTIONS_DRAINED           = 80;
+    static final int REBUILD_MESSAGE_FTS_INDEX_3   = 81;
+    static final int TO_FROM_RECIPIENTS            = 82;
+    static final int REBUILD_MESSAGE_FTS_INDEX_4   = 83;
+    static final int INDEX_DATABASE_MIGRATION      = 84;
+    static final int ACCOUNT_CONSISTENCY_CHECK     = 85;
+    static final int BACKUP_JITTER                 = 86;
+    static final int PREKEY_SYNC                   = 87;
+    static final int DEDUPE_DB_MIGRATION           = 88;
+    static final int DEDUPE_DB_MIGRATION_2         = 89;
+    static final int EMOJI_VERSION_8               = 90;
+    static final int SVR2_MIRROR                   = 91;
+    static final int ATTACHMENT_CLEANUP_3          = 92;
+    static final int EMOJI_SEARCH_INDEX_CHECK      = 93;
+    static final int IDENTITY_FIX                  = 94;
   }
 
-  public static final int CURRENT_VERSION = 80;
+  public static final int CURRENT_VERSION = 94;
 
   /**
    * This *must* be called after the {@link JobManager} has been instantiated, but *before* the call
@@ -443,9 +456,9 @@ public class ApplicationMigrations {
       jobs.put(Version.CHANGE_NUMBER_CAPABILITY_4,new AttributesMigrationJob());
     }
 
-    if (lastSeenVersion < Version.KBS_MIGRATION) {
-      jobs.put(Version.KBS_MIGRATION, new KbsEnclaveMigrationJob());
-    }
+    // if (lastSeenVersion < Version.KBS_MIGRATION) {
+    //   jobs.put(Version.KBS_MIGRATION, new KbsEnclaveMigrationJob());
+    // }
 
     if (lastSeenVersion < Version.PNI_IDENTITY) {
       jobs.put(Version.PNI_IDENTITY, new PniAccountInitializationMigrationJob());
@@ -483,9 +496,9 @@ public class ApplicationMigrations {
       jobs.put(Version.REFRESH_PNI_REGISTRATION_ID, new AttributesMigrationJob());
     }
 
-    if (lastSeenVersion < Version.KBS_MIGRATION_2) {
-      jobs.put(Version.KBS_MIGRATION_2, new KbsEnclaveMigrationJob());
-    }
+    // if (lastSeenVersion < Version.KBS_MIGRATION_2) {
+    //   jobs.put(Version.KBS_MIGRATION_2, new KbsEnclaveMigrationJob());
+    // }
 
     if (lastSeenVersion < Version.PNI_2) {
       jobs.put(Version.PNI_2, new PniMigrationJob());
@@ -545,6 +558,62 @@ public class ApplicationMigrations {
 
     if (lastSeenVersion < Version.DECRYPTIONS_DRAINED) {
       jobs.put(Version.DECRYPTIONS_DRAINED, new DecryptionsDrainedMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.REBUILD_MESSAGE_FTS_INDEX_3) {
+      jobs.put(Version.REBUILD_MESSAGE_FTS_INDEX_3, new RebuildMessageSearchIndexMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.TO_FROM_RECIPIENTS) {
+      jobs.put(Version.TO_FROM_RECIPIENTS, new DatabaseMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.REBUILD_MESSAGE_FTS_INDEX_4) {
+      jobs.put(Version.REBUILD_MESSAGE_FTS_INDEX_4, new RebuildMessageSearchIndexMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.INDEX_DATABASE_MIGRATION) {
+      jobs.put(Version.INDEX_DATABASE_MIGRATION, new DatabaseMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.ACCOUNT_CONSISTENCY_CHECK) {
+      jobs.put(Version.ACCOUNT_CONSISTENCY_CHECK, new AccountConsistencyMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.BACKUP_JITTER) {
+      jobs.put(Version.BACKUP_JITTER, new BackupJitterMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.PREKEY_SYNC) {
+      jobs.put(Version.PREKEY_SYNC, new PreKeysSyncMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.DEDUPE_DB_MIGRATION) {
+      jobs.put(Version.DEDUPE_DB_MIGRATION, new DatabaseMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.DEDUPE_DB_MIGRATION_2) {
+      jobs.put(Version.DEDUPE_DB_MIGRATION_2, new DatabaseMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.EMOJI_VERSION_8) {
+      jobs.put(Version.EMOJI_VERSION_8, new EmojiDownloadMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.SVR2_MIRROR) {
+      jobs.put(Version.SVR2_MIRROR, new Svr2MirrorMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.ATTACHMENT_CLEANUP_3) {
+      jobs.put(Version.ATTACHMENT_CLEANUP_3, new AttachmentCleanupMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.EMOJI_SEARCH_INDEX_CHECK) {
+      jobs.put(Version.EMOJI_SEARCH_INDEX_CHECK, new EmojiSearchIndexCheckMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.IDENTITY_FIX) {
+      jobs.put(Version.IDENTITY_FIX, new IdentityTableCleanupMigrationJob());
     }
 
     return jobs;

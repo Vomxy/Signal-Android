@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.PopupMenu
 import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
 import androidx.appcompat.widget.Toolbar
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.setFragmentResult
@@ -20,6 +21,7 @@ import org.signal.core.util.getParcelableExtraCompat
 import org.thoughtcrime.securesms.R
 import org.thoughtcrime.securesms.avatar.Avatar
 import org.thoughtcrime.securesms.avatar.AvatarBundler
+import org.thoughtcrime.securesms.avatar.photo.PhotoEditorActivity
 import org.thoughtcrime.securesms.avatar.photo.PhotoEditorFragment
 import org.thoughtcrime.securesms.avatar.text.TextAvatarCreationFragment
 import org.thoughtcrime.securesms.avatar.vector.VectorAvatarCreationFragment
@@ -50,6 +52,7 @@ class AvatarPickerFragment : Fragment(R.layout.avatar_picker_fragment) {
   private val viewModel: AvatarPickerViewModel by viewModels(factoryProducer = this::createFactory)
 
   private lateinit var recycler: RecyclerView
+  private lateinit var photoEditorLauncher: ActivityResultLauncher<Avatar.Photo>
 
   private fun createFactory(): AvatarPickerViewModel.Factory {
     val args = AvatarPickerFragmentArgs.fromBundle(requireArguments())
@@ -137,9 +140,13 @@ class AvatarPickerFragment : Fragment(R.layout.avatar_picker_fragment) {
       viewModel.onAvatarEditCompleted(vector)
     }
 
-    setFragmentResultListener(PhotoEditorFragment.REQUEST_KEY_EDIT) { _, bundle ->
-      val photo = AvatarBundler.extractPhoto(bundle)
-      viewModel.onAvatarEditCompleted(photo)
+    setFragmentResultListener(PhotoEditorFragment.REQUEST_KEY_EDIT) { _, _ ->
+    }
+
+    photoEditorLauncher = registerForActivityResult(PhotoEditorActivity.Contract()) { photo ->
+      if (photo != null) {
+        viewModel.onAvatarEditCompleted(photo)
+      }
     }
   }
 
@@ -148,6 +155,7 @@ class AvatarPickerFragment : Fragment(R.layout.avatar_picker_fragment) {
     ViewUtil.hideKeyboard(requireContext(), requireView())
   }
 
+  @Deprecated("Deprecated in Java")
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
     if (requestCode == REQUEST_CODE_SELECT_IMAGE && resultCode == Activity.RESULT_OK && data != null) {
       val media: Media = requireNotNull(data.getParcelableExtraCompat(AvatarSelectionActivity.EXTRA_MEDIA, Media::class.java))
@@ -187,7 +195,7 @@ class AvatarPickerFragment : Fragment(R.layout.avatar_picker_fragment) {
     return true
   }
 
-  fun openEditor(avatar: Avatar) {
+  private fun openEditor(avatar: Avatar) {
     when (avatar) {
       is Avatar.Photo -> openPhotoEditor(avatar)
       is Avatar.Resource -> throw UnsupportedOperationException()
@@ -197,8 +205,7 @@ class AvatarPickerFragment : Fragment(R.layout.avatar_picker_fragment) {
   }
 
   private fun openPhotoEditor(photo: Avatar.Photo) {
-    Navigation.findNavController(requireView())
-      .safeNavigate(AvatarPickerFragmentDirections.actionAvatarPickerFragmentToAvatarPhotoEditorFragment(AvatarBundler.bundlePhoto(photo)))
+    photoEditorLauncher.launch(photo)
   }
 
   private fun openVectorEditor(vector: Avatar.Vector) {
@@ -244,6 +251,7 @@ class AvatarPickerFragment : Fragment(R.layout.avatar_picker_fragment) {
       .execute()
   }
 
+  @Deprecated("Deprecated in Java")
   override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
     Permissions.onRequestPermissionsResult(this, requestCode, permissions, grantResults)
   }

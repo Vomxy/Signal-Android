@@ -16,6 +16,7 @@ import org.thoughtcrime.securesms.events.CallParticipant;
 import org.thoughtcrime.securesms.events.CallParticipantId;
 import org.thoughtcrime.securesms.events.WebRtcViewModel;
 import org.thoughtcrime.securesms.keyvalue.SignalStore;
+import org.thoughtcrime.securesms.recipients.Recipient;
 import org.thoughtcrime.securesms.ringrtc.Camera;
 import org.thoughtcrime.securesms.ringrtc.RemotePeer;
 import org.thoughtcrime.securesms.service.webrtc.state.WebRtcEphemeralState;
@@ -33,8 +34,12 @@ public class GroupConnectedActionProcessor extends GroupActionProcessor {
 
   private static final String TAG = Log.tag(GroupConnectedActionProcessor.class);
 
-  public GroupConnectedActionProcessor(@NonNull WebRtcInteractor webRtcInteractor) {
-    super(webRtcInteractor, TAG);
+  public GroupConnectedActionProcessor(@NonNull MultiPeerActionProcessorFactory actionProcessorFactory, @NonNull WebRtcInteractor webRtcInteractor) {
+    this(actionProcessorFactory, webRtcInteractor, TAG);
+  }
+
+  protected GroupConnectedActionProcessor(@NonNull MultiPeerActionProcessorFactory actionProcessorFactory, @NonNull WebRtcInteractor webRtcInteractor, @NonNull String tag) {
+    super(actionProcessorFactory, webRtcInteractor, tag);
   }
 
   @Override
@@ -75,7 +80,7 @@ public class GroupConnectedActionProcessor extends GroupActionProcessor {
 
   @Override
   protected @NonNull WebRtcServiceState handleSetEnableVideo(@NonNull WebRtcServiceState currentState, boolean enable) {
-    Log.i(TAG, "handleSetEnableVideo():");
+    Log.i(tag, "handleSetEnableVideo():");
 
     GroupCall groupCall = currentState.getCallInfoState().requireGroupCall();
     Camera    camera    = currentState.getVideoState().requireCamera();
@@ -148,8 +153,9 @@ public class GroupConnectedActionProcessor extends GroupActionProcessor {
       return currentState;
     }
 
-    String eraId = WebRtcUtil.getGroupCallEraId(groupCall);
-    webRtcInteractor.sendGroupCallMessage(currentState.getCallInfoState().getCallRecipient(), eraId);
+    boolean remoteUserRangTheCall = currentState.getCallSetupState(RemotePeer.GROUP_CALL_ID).getRingerRecipient() != Recipient.self();
+    String  eraId                 = WebRtcUtil.getGroupCallEraId(groupCall);
+    webRtcInteractor.sendGroupCallMessage(currentState.getCallInfoState().getCallRecipient(), eraId, remoteUserRangTheCall, true);
 
     List<UUID> members = new ArrayList<>(peekInfo.getJoinedMembers());
     if (!members.contains(SignalStore.account().requireAci().uuid())) {
@@ -165,7 +171,7 @@ public class GroupConnectedActionProcessor extends GroupActionProcessor {
 
   @Override
   protected @NonNull WebRtcServiceState handleLocalHangup(@NonNull WebRtcServiceState currentState) {
-    Log.i(TAG, "handleLocalHangup():");
+    Log.i(tag, "handleLocalHangup():");
 
     GroupCall groupCall = currentState.getCallInfoState().requireGroupCall();
 
@@ -176,7 +182,7 @@ public class GroupConnectedActionProcessor extends GroupActionProcessor {
     }
 
     String eraId = WebRtcUtil.getGroupCallEraId(groupCall);
-    webRtcInteractor.sendGroupCallMessage(currentState.getCallInfoState().getCallRecipient(), eraId);
+    webRtcInteractor.sendGroupCallMessage(currentState.getCallInfoState().getCallRecipient(), eraId, false, false);
 
     List<UUID> members = Stream.of(currentState.getCallInfoState().getRemoteCallParticipants()).map(p -> p.getRecipient().requireServiceId().uuid()).toList();
     webRtcInteractor.updateGroupCallUpdateMessage(currentState.getCallInfoState().getCallRecipient().getId(), eraId, members, false);

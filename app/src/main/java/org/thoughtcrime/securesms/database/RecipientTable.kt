@@ -3,6 +3,7 @@ package org.thoughtcrime.securesms.database
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
+import android.database.sqlite.SQLiteConstraintException
 import android.net.Uri
 import android.text.TextUtils
 import androidx.annotation.VisibleForTesting
@@ -10,10 +11,10 @@ import androidx.core.content.contentValuesOf
 import app.cash.exhaustive.Exhaustive
 import com.google.protobuf.ByteString
 import com.google.protobuf.InvalidProtocolBufferException
-import net.zetetic.database.sqlcipher.SQLiteConstraintException
 import org.signal.core.util.Bitmask
 import org.signal.core.util.CursorUtil
 import org.signal.core.util.SqlUtil
+import org.signal.core.util.delete
 import org.signal.core.util.exists
 import org.signal.core.util.logging.Log
 import org.signal.core.util.optionalBlob
@@ -22,6 +23,8 @@ import org.signal.core.util.optionalInt
 import org.signal.core.util.optionalLong
 import org.signal.core.util.optionalString
 import org.signal.core.util.or
+import org.signal.core.util.orNull
+import org.signal.core.util.readToList
 import org.signal.core.util.readToSet
 import org.signal.core.util.readToSingleBoolean
 import org.signal.core.util.readToSingleLong
@@ -32,7 +35,6 @@ import org.signal.core.util.requireLong
 import org.signal.core.util.requireNonNullString
 import org.signal.core.util.requireString
 import org.signal.core.util.select
-import org.signal.core.util.toSingleLine
 import org.signal.core.util.update
 import org.signal.core.util.withinTransaction
 import org.signal.libsignal.protocol.IdentityKey
@@ -47,6 +49,7 @@ import org.thoughtcrime.securesms.badges.models.Badge
 import org.thoughtcrime.securesms.color.MaterialColor
 import org.thoughtcrime.securesms.color.MaterialColor.UnknownColorException
 import org.thoughtcrime.securesms.conversation.colors.AvatarColor
+import org.thoughtcrime.securesms.conversation.colors.AvatarColorHash
 import org.thoughtcrime.securesms.conversation.colors.ChatColors
 import org.thoughtcrime.securesms.conversation.colors.ChatColors.Companion.forChatColor
 import org.thoughtcrime.securesms.conversation.colors.ChatColors.Id.Companion.forLongValue
@@ -77,6 +80,7 @@ import org.thoughtcrime.securesms.groups.BadGroupIdException
 import org.thoughtcrime.securesms.groups.GroupId
 import org.thoughtcrime.securesms.groups.GroupId.V1
 import org.thoughtcrime.securesms.groups.GroupId.V2
+import org.thoughtcrime.securesms.groups.GroupsV1MigratedCache
 import org.thoughtcrime.securesms.groups.v2.ProfileKeySet
 import org.thoughtcrime.securesms.groups.v2.processing.GroupsV2StateProcessor
 import org.thoughtcrime.securesms.jobs.RequestGroupV2InfoJob
@@ -86,6 +90,7 @@ import org.thoughtcrime.securesms.profiles.AvatarHelper
 import org.thoughtcrime.securesms.profiles.ProfileName
 import org.thoughtcrime.securesms.recipients.Recipient
 import org.thoughtcrime.securesms.recipients.RecipientId
+import org.thoughtcrime.securesms.service.webrtc.links.CallLinkRoomId
 import org.thoughtcrime.securesms.storage.StorageRecordUpdate
 import org.thoughtcrime.securesms.storage.StorageSyncHelper
 import org.thoughtcrime.securesms.storage.StorageSyncModels
@@ -131,11 +136,12 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
     const val ID = "_id"
     const val SERVICE_ID = "uuid"
     const val PNI_COLUMN = "pni"
-    private const val USERNAME = "username"
+    const val USERNAME = "username"
     const val PHONE = "phone"
     const val EMAIL = "email"
     const val GROUP_ID = "group_id"
     const val DISTRIBUTION_LIST_ID = "distribution_list_id"
+    private const val CALL_LINK_ROOM_ID = "call_link_room_id"
     const val GROUP_TYPE = "group_type"
     const val BLOCKED = "blocked"
     private const val MESSAGE_RINGTONE = "message_ringtone"
@@ -167,9 +173,9 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
     const val FORCE_SMS_SELECTION = "force_sms_selection"
     private const val CAPABILITIES = "capabilities"
     const val STORAGE_SERVICE_ID = "storage_service_key"
-    private const val PROFILE_GIVEN_NAME = "signal_profile_name"
+    const val PROFILE_GIVEN_NAME = "signal_profile_name"
     private const val PROFILE_FAMILY_NAME = "profile_family_name"
-    private const val PROFILE_JOINED_NAME = "profile_joined_name"
+    const val PROFILE_JOINED_NAME = "profile_joined_name"
     private const val MENTION_SETTING = "mention_setting"
     private const val STORAGE_PROTO = "storage_proto"
     private const val LAST_SESSION_RESET = "last_session_reset"
@@ -183,12 +189,12 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
     private const val CUSTOM_CHAT_COLORS_ID = "custom_chat_colors_id"
     private const val BADGES = "badges"
     const val SEARCH_PROFILE_NAME = "search_signal_profile"
-    private const val SORT_NAME = "sort_name"
+    const val SORT_NAME = "sort_name"
     private const val IDENTITY_STATUS = "identity_status"
     private const val IDENTITY_KEY = "identity_key"
     private const val NEEDS_PNI_SIGNATURE = "needs_pni_signature"
     private const val UNREGISTERED_TIMESTAMP = "unregistered_timestamp"
-    private const val HIDDEN = "hidden"
+    const val HIDDEN = "hidden"
     const val REPORTING_TOKEN = "reporting_token"
 
     @JvmField
@@ -252,9 +258,10 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
         $UNREGISTERED_TIMESTAMP INTEGER DEFAULT 0,
         $HIDDEN INTEGER DEFAULT 0,
         $REPORTING_TOKEN BLOB DEFAULT NULL,
-        $SYSTEM_NICKNAME TEXT DEFAULT NULL
+        $SYSTEM_NICKNAME TEXT DEFAULT NULL,
+        $CALL_LINK_ROOM_ID TEXT DEFAULT NULL
       )
-      """.trimIndent()
+      """
 
     val CREATE_INDEXS = arrayOf(
       "CREATE INDEX IF NOT EXISTS recipient_group_type_index ON $TABLE_NAME ($GROUP_TYPE);",
@@ -315,7 +322,8 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
       DISTRIBUTION_LIST_ID,
       NEEDS_PNI_SIGNATURE,
       HIDDEN,
-      REPORTING_TOKEN
+      REPORTING_TOKEN,
+      CALL_LINK_ROOM_ID
     )
 
     private val ID_PROJECTION = arrayOf(ID)
@@ -343,7 +351,7 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
           NULLIF($USERNAME, '')
         )
       ) AS $SORT_NAME
-      """.trimIndent()
+      """
     )
 
     @JvmField
@@ -385,7 +393,7 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
         ' ',
         ''
       ) AS $SORT_NAME
-      """.trimIndent()
+      """
     )
 
     private val INSIGHTS_INVITEE_LIST =
@@ -398,9 +406,13 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
         $TABLE_NAME.$SEEN_INVITE_REMINDER < ${InsightsBannerTier.TIER_TWO.id} AND
         ${ThreadTable.TABLE_NAME}.${ThreadTable.HAS_SENT} AND
         ${ThreadTable.TABLE_NAME}.${ThreadTable.DATE} > ? AND
+        ${ThreadTable.TABLE_NAME}.${ThreadTable.ACTIVE} = 1 AND
         $TABLE_NAME.$HIDDEN = 0
       ORDER BY ${ThreadTable.TABLE_NAME}.${ThreadTable.DATE} DESC LIMIT 50
       """
+
+    /** Used as a placeholder recipient for self during migrations when self isn't yet available. */
+    private val PLACEHOLDER_SELF_ID = -2L
   }
 
   fun getByE164(e164: String): Optional<RecipientId> {
@@ -413,6 +425,10 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
 
   fun getByServiceId(serviceId: ServiceId): Optional<RecipientId> {
     return getByColumn(SERVICE_ID, serviceId.toString())
+  }
+
+  fun getByCallLinkRoomId(callLinkRoomId: CallLinkRoomId): Optional<RecipientId> {
+    return getByColumn(CALL_LINK_ROOM_ID, callLinkRoomId.serialize())
   }
 
   /**
@@ -553,6 +569,18 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
     ).recipientId
   }
 
+  fun getOrInsertFromCallLinkRoomId(callLinkRoomId: CallLinkRoomId): RecipientId {
+    return getOrInsertByColumn(
+      CALL_LINK_ROOM_ID,
+      callLinkRoomId.serialize(),
+      contentValuesOf(
+        GROUP_TYPE to GroupType.CALL_LINK.id,
+        CALL_LINK_ROOM_ID to callLinkRoomId.serialize(),
+        PROFILE_SHARING to 1
+      )
+    ).recipientId
+  }
+
   fun getDistributionListRecipientIds(): List<RecipientId> {
     val recipientIds = mutableListOf<RecipientId>()
     readableDatabase.query(TABLE_NAME, arrayOf(ID), "$DISTRIBUTION_LIST_ID is not NULL", null, null, null, null).use { cursor ->
@@ -571,12 +599,12 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
       return existing.get()
     } else if (groupId.isV1 && groups.groupExists(groupId.requireV1().deriveV2MigrationGroupId())) {
       throw LegacyGroupInsertException(groupId)
-    } else if (groupId.isV2 && groups.getGroupV1ByExpectedV2(groupId.requireV2()).isPresent) {
+    } else if (groupId.isV2 && GroupsV1MigratedCache.hasV1Group(groupId.requireV2())) {
       throw MissedGroupMigrationInsertException(groupId)
     } else {
       val values = ContentValues().apply {
         put(GROUP_ID, groupId.toString())
-        put(AVATAR_COLOR, AvatarColor.random().serialize())
+        put(AVATAR_COLOR, AvatarColorHash.forGroupId(groupId).serialize())
       }
 
       val id = writableDatabase.insert(TABLE_NAME, null, values)
@@ -636,10 +664,10 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
       }
 
       if (groupId.isV2) {
-        val v1 = groups.getGroupV1ByExpectedV2(groupId.requireV2())
-        if (v1.isPresent) {
+        val v1 = GroupsV1MigratedCache.getV1GroupByV2Id(groupId.requireV2())
+        if (v1 != null) {
           db.setTransactionSuccessful()
-          return v1.get().recipientId
+          return v1.recipientId
         }
       }
 
@@ -912,12 +940,16 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
     val recipient = Recipient.externalGroupExact(groupId)
 
     Log.i(TAG, "Creating restore placeholder for $groupId")
-    groups.create(
+    val createdId = groups.create(
       masterKey,
       DecryptedGroup.newBuilder()
         .setRevision(GroupsV2StateProcessor.RESTORE_PLACEHOLDER_REVISION)
         .build()
     )
+
+    if (createdId == null) {
+      Log.w(TAG, "Unable to create restore placeholder for $groupId, group already exists")
+    }
 
     groups.setShowAsStoryState(groupId, insert.storySendMode.toShowAsStoryState())
     updateExtras(recipient.id) {
@@ -979,6 +1011,14 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
       } else {
         putNull(STORAGE_PROTO)
       }
+    }
+
+    if (update.new.username != null) {
+      writableDatabase
+        .update(TABLE_NAME)
+        .values(USERNAME to null)
+        .where("$USERNAME = ?", update.new.username!!)
+        .run()
     }
 
     val updateCount = writableDatabase.update(TABLE_NAME, values, "$STORAGE_SERVICE_ID = ?", arrayOf(Base64.encodeBytes(update.old.id.raw)))
@@ -1071,7 +1111,7 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
       $TABLE_NAME LEFT OUTER JOIN ${IdentityTable.TABLE_NAME} ON $TABLE_NAME.$SERVICE_ID = ${IdentityTable.TABLE_NAME}.${IdentityTable.ADDRESS} 
                   LEFT OUTER JOIN ${GroupTable.TABLE_NAME} ON $TABLE_NAME.$GROUP_ID = ${GroupTable.TABLE_NAME}.${GroupTable.GROUP_ID} 
                   LEFT OUTER JOIN ${ThreadTable.TABLE_NAME} ON $TABLE_NAME.$ID = ${ThreadTable.TABLE_NAME}.${ThreadTable.RECIPIENT_ID}
-      """.trimIndent()
+      """
     val out: MutableList<RecipientRecord> = ArrayList()
     val columns: Array<String> = TYPED_RECIPIENT_PROJECTION + arrayOf(
       SYSTEM_NICKNAME,
@@ -1121,7 +1161,7 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
               FROM ${DistributionListTables.ListTable.TABLE_NAME}
             )
         )
-        """.toSingleLine(),
+        """,
         GroupType.NONE.id,
         Recipient.self().id,
         GroupType.SIGNAL_V1.id
@@ -1676,6 +1716,13 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
     return updated
   }
 
+  fun containsId(id: RecipientId): Boolean {
+    return readableDatabase
+      .exists(TABLE_NAME)
+      .where("$ID = ?", id.serialize())
+      .run()
+  }
+
   fun setReportingToken(id: RecipientId, reportingToken: ByteArray) {
     val values = ContentValues(1).apply {
       put(REPORTING_TOKEN, reportingToken)
@@ -1764,11 +1811,19 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
     }
   }
 
-  fun markHidden(id: RecipientId) {
-    val contentValues = contentValuesOf(
-      HIDDEN to 1,
-      PROFILE_SHARING to 0
-    )
+  fun markHidden(id: RecipientId, clearProfileKey: Boolean = false) {
+    val contentValues = if (clearProfileKey) {
+      contentValuesOf(
+        HIDDEN to 1,
+        PROFILE_SHARING to 0,
+        PROFILE_KEY to null
+      )
+    } else {
+      contentValuesOf(
+        HIDDEN to 1,
+        PROFILE_SHARING to 0
+      )
+    }
 
     val updated = writableDatabase.update(TABLE_NAME, contentValues, "$ID_WHERE AND $GROUP_TYPE = ?", SqlUtil.buildArgs(id, GroupType.NONE.id)) > 0
     if (updated) {
@@ -1999,7 +2054,8 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
    * Associates the provided IDs together. The assumption here is that all of the IDs correspond to the local user and have been verified.
    */
   fun linkIdsForSelf(aci: ACI, pni: PNI, e164: String) {
-    getAndPossiblyMerge(serviceId = aci, pni = pni, e164 = e164, changeSelf = true, pniVerified = true)
+    val id: RecipientId = getAndPossiblyMerge(serviceId = aci, pni = pni, e164 = e164, changeSelf = true, pniVerified = true)
+    updatePendingSelfData(id)
   }
 
   /**
@@ -3087,6 +3143,21 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
     }
   }
 
+  fun queryByInternalFields(query: String): List<RecipientRecord> {
+    if (query.isBlank()) {
+      return emptyList()
+    }
+
+    return readableDatabase
+      .select()
+      .from(TABLE_NAME)
+      .where("$ID LIKE ? OR $SERVICE_ID LIKE ? OR $PNI_COLUMN LIKE ?", "%$query%", "%$query%", "%$query%")
+      .run()
+      .readToList { cursor ->
+        getRecord(context, cursor)
+      }
+  }
+
   fun getSignalContacts(includeSelf: Boolean): Cursor? {
     return getSignalContacts(includeSelf, "$SORT_NAME, $SYSTEM_JOINED_NAME, $SEARCH_PROFILE_NAME, $USERNAME, $PHONE")
   }
@@ -3143,7 +3214,7 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
           ORDER BY $SORT_NAME, $SYSTEM_JOINED_NAME, $SEARCH_PROFILE_NAME, $PHONE
         )
         GROUP BY letter_header
-      """.trimIndent(),
+      """,
       searchSelection.args
     ).use { cursor ->
       if (cursor.count == 0) {
@@ -3248,7 +3319,7 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
           $PHONE GLOB ? OR 
           $EMAIL GLOB ?
         )
-      """.trimIndent()
+      """
     val args = SqlUtil.buildArgs(0, 0, query, query, query, query)
     return readableDatabase.query(TABLE_NAME, SEARCH_PROJECTION, selection, args, null, null, null)
   }
@@ -3269,25 +3340,28 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
           $PHONE GLOB ? OR 
           $EMAIL GLOB ?
       ))
-    """.toSingleLine()
+    """
 
     return SqlUtil.Query(subquery, SqlUtil.buildArgs(0, 0, query, query, query, query))
   }
 
+  /**
+   * Queries all contacts without an active thread.
+   */
   fun getAllContactsWithoutThreads(inputQuery: String): Cursor {
     val query = SqlUtil.buildCaseInsensitiveGlobPattern(inputQuery)
 
     //language=sql
     val subquery = """
       SELECT ${SEARCH_PROJECTION.joinToString(", ")} FROM $TABLE_NAME
-      WHERE $BLOCKED = ? AND $HIDDEN = ? AND NOT EXISTS (SELECT 1 FROM ${ThreadTable.TABLE_NAME} WHERE ${ThreadTable.TABLE_NAME}.${ThreadTable.RECIPIENT_ID} = $TABLE_NAME.$ID LIMIT 1) 
+      WHERE $BLOCKED = ? AND $HIDDEN = ? AND NOT EXISTS (SELECT 1 FROM ${ThreadTable.TABLE_NAME} WHERE ${ThreadTable.TABLE_NAME}.${ThreadTable.ACTIVE} = 1 AND ${ThreadTable.TABLE_NAME}.${ThreadTable.RECIPIENT_ID} = $TABLE_NAME.$ID LIMIT 1) 
       AND (
           $SORT_NAME GLOB ? OR 
           $USERNAME GLOB ? OR 
           $PHONE GLOB ? OR 
           $EMAIL GLOB ?
       )
-    """.toSingleLine()
+    """
 
     return readableDatabase.query(subquery, SqlUtil.buildArgs(0, 0, query, query, query, query))
   }
@@ -3307,7 +3381,9 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
     RecipientReader(readableDatabase.query(TABLE_NAME, MENTION_SEARCH_PROJECTION, selection, SqlUtil.buildArgs(query), null, null, SORT_NAME)).use { reader ->
       var recipient: Recipient? = reader.getNext()
       while (recipient != null) {
-        recipients.add(recipient)
+        if (!recipient.isSelf) {
+          recipients.add(recipient)
+        }
         recipient = reader.getNext()
       }
     }
@@ -3464,7 +3540,7 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
           r.$PROFILE_SHARING = 0 AND (
             EXISTS(SELECT 1 FROM ${MessageTable.TABLE_NAME} WHERE ${MessageTable.THREAD_ID} = t.${ThreadTable.ID} AND ${MessageTable.DATE_RECEIVED} < ?)
           )
-      """.trimIndent()
+      """
 
     val idsToUpdate: MutableList<Long> = ArrayList()
     readableDatabase.rawQuery(select, whereArgs).use { cursor ->
@@ -3786,12 +3862,13 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
   private fun buildContentValuesForNewUser(e164: String?, pni: PNI?, aci: ACI?): ContentValues {
     check(e164 != null || pni != null || aci != null) { "Must provide some sort of identifier!" }
 
+    val serviceId = (aci ?: pni)?.toString()
     val values = contentValuesOf(
       PHONE to e164,
-      SERVICE_ID to (aci ?: pni)?.toString(),
+      SERVICE_ID to serviceId,
       PNI_COLUMN to pni?.toString(),
       STORAGE_SERVICE_ID to Base64.encodeBytes(StorageSyncHelper.generateKey()),
-      AVATAR_COLOR to AvatarColor.random().serialize()
+      AVATAR_COLOR to AvatarColorHash.forAddress(serviceId, e164).serialize()
     )
 
     if (pni != null || aci != null) {
@@ -3848,14 +3925,16 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
       }
 
       if (isInsert) {
-        put(AVATAR_COLOR, AvatarColor.random().serialize())
+        put(AVATAR_COLOR, AvatarColorHash.forAddress(contact.serviceId.toString(), contact.number.orNull()).serialize())
       }
     }
   }
 
   private fun getValuesForStorageGroupV1(groupV1: SignalGroupV1Record, isInsert: Boolean): ContentValues {
     return ContentValues().apply {
-      put(GROUP_ID, GroupId.v1orThrow(groupV1.groupId).toString())
+      val groupId = GroupId.v1orThrow(groupV1.groupId)
+
+      put(GROUP_ID, groupId.toString())
       put(GROUP_TYPE, GroupType.SIGNAL_V1.id)
       put(PROFILE_SHARING, if (groupV1.isProfileSharingEnabled) "1" else "0")
       put(BLOCKED, if (groupV1.isBlocked) "1" else "0")
@@ -3869,14 +3948,16 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
       }
 
       if (isInsert) {
-        put(AVATAR_COLOR, AvatarColor.random().serialize())
+        put(AVATAR_COLOR, AvatarColorHash.forGroupId(groupId).serialize())
       }
     }
   }
 
   private fun getValuesForStorageGroupV2(groupV2: SignalGroupV2Record, isInsert: Boolean): ContentValues {
     return ContentValues().apply {
-      put(GROUP_ID, GroupId.v2(groupV2.masterKeyOrThrow).toString())
+      val groupId = GroupId.v2(groupV2.masterKeyOrThrow)
+
+      put(GROUP_ID, groupId.toString())
       put(GROUP_TYPE, GroupType.SIGNAL_V2.id)
       put(PROFILE_SHARING, if (groupV2.isProfileSharingEnabled) "1" else "0")
       put(BLOCKED, if (groupV2.isBlocked) "1" else "0")
@@ -3891,8 +3972,27 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
       }
 
       if (isInsert) {
-        put(AVATAR_COLOR, AvatarColor.random().serialize())
+        put(AVATAR_COLOR, AvatarColorHash.forGroupId(groupId).serialize())
       }
+    }
+  }
+
+  /**
+   * Should be called immediately after we create a recipient for self.
+   * This clears up any placeholders we put in the database for the local user, which is typically only done in database migrations.
+   */
+  fun updatePendingSelfData(selfId: RecipientId) {
+    SignalDatabase.messages.updatePendingSelfData(RecipientId.from(PLACEHOLDER_SELF_ID), selfId)
+
+    val deletes = writableDatabase
+      .delete(TABLE_NAME)
+      .where("$ID = ?", PLACEHOLDER_SELF_ID)
+      .run()
+
+    if (deletes > 0) {
+      Log.w(TAG, "Deleted a PLACEHOLDER_SELF from the table.")
+    } else {
+      Log.i(TAG, "No PLACEHOLDER_SELF in the table.")
     }
   }
 
@@ -3983,7 +4083,7 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
         UPDATE $TABLE_NAME
         SET $SERVICE_ID = $PNI_COLUMN
         WHERE $ID = ? AND $PNI_COLUMN NOT NULL
-      """.toSingleLine(),
+      """,
       SqlUtil.buildArgs(recipientId)
     )
 
@@ -4102,7 +4202,8 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
       hasGroupsInCommon = cursor.requireBoolean(GROUPS_IN_COMMON),
       badges = parseBadgeList(cursor.requireBlob(BADGES)),
       needsPniSignature = cursor.requireBoolean(NEEDS_PNI_SIGNATURE),
-      isHidden = cursor.requireBoolean(HIDDEN)
+      isHidden = cursor.requireBoolean(HIDDEN),
+      callLinkRoomId = cursor.requireString(CALL_LINK_ROOM_ID)?.let { CallLinkRoomId.DatabaseSerializer.deserialize(it) }
     )
   }
 
@@ -4451,7 +4552,7 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
             INNER JOIN ${GroupTable.TABLE_NAME} ON ${GroupTable.TABLE_NAME}.${GroupTable.GROUP_ID} = ${GroupTable.MembershipTable.TABLE_NAME}.${GroupTable.MembershipTable.GROUP_ID}
             WHERE ${GroupTable.MembershipTable.TABLE_NAME}.${GroupTable.MembershipTable.RECIPIENT_ID} = $TABLE_NAME.$ID AND ${GroupTable.TABLE_NAME}.${GroupTable.ACTIVE} = 1 AND ${GroupTable.TABLE_NAME}.${GroupTable.MMS} = 0
         )
-      """.toSingleLine()
+      """
       const val FILTER_GROUPS = " AND $GROUP_ID IS NULL"
       const val FILTER_ID = " AND $ID != ?"
       const val FILTER_BLOCKED = " AND $BLOCKED = ?"
@@ -4532,7 +4633,7 @@ open class RecipientTable(context: Context, databaseHelper: SignalDatabase) : Da
   }
 
   enum class GroupType(val id: Int) {
-    NONE(0), MMS(1), SIGNAL_V1(2), SIGNAL_V2(3), DISTRIBUTION_LIST(4);
+    NONE(0), MMS(1), SIGNAL_V1(2), SIGNAL_V2(3), DISTRIBUTION_LIST(4), CALL_LINK(5);
 
     companion object {
       fun fromId(id: Int): GroupType {

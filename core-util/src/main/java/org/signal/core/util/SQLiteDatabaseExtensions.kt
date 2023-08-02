@@ -35,6 +35,34 @@ fun SupportSQLiteDatabase.getTableRowCount(table: String): Int {
   }
 }
 
+fun SupportSQLiteDatabase.getForeignKeys(): List<ForeignKeyConstraint> {
+  return SqlUtil.getAllTables(this)
+    .map { table ->
+      this.query("PRAGMA foreign_key_list($table)").readToList { cursor ->
+        ForeignKeyConstraint(
+          table = table,
+          column = cursor.requireNonNullString("from"),
+          dependsOnTable = cursor.requireNonNullString("table"),
+          dependsOnColumn = cursor.requireNonNullString("to"),
+          onDelete = cursor.requireString("on_delete") ?: "NOTHING"
+        )
+      }
+    }
+    .flatten()
+}
+
+fun SupportSQLiteDatabase.getIndexes(): List<Index> {
+  return this.query("SELECT name, tbl_name FROM sqlite_master WHERE type='index' ORDER BY name ASC").readToList { cursor ->
+    val indexName = cursor.requireNonNullString("name")
+
+    Index(
+      name = indexName,
+      table = cursor.requireNonNullString("tbl_name"),
+      columns = this.query("PRAGMA index_info($indexName)").readToList { it.requireNonNullString("name") }
+    )
+  }
+}
+
 /**
  * Checks if a row exists that matches the query.
  */
@@ -68,6 +96,10 @@ fun SupportSQLiteDatabase.update(tableName: String): UpdateBuilderPart1 {
  */
 fun SupportSQLiteDatabase.delete(tableName: String): DeleteBuilderPart1 {
   return DeleteBuilderPart1(this, tableName)
+}
+
+fun SupportSQLiteDatabase.insertInto(tableName: String): InsertBuilderPart1 {
+  return InsertBuilderPart1(this, tableName)
 }
 
 class SelectBuilderPart1(
@@ -117,6 +149,14 @@ class SelectBuilderPart3(
     return SelectBuilderPart4b(db, columns, tableName, where, whereArgs, limit.toString())
   }
 
+  fun limit(limit: String): SelectBuilderPart4b {
+    return SelectBuilderPart4b(db, columns, tableName, where, whereArgs, limit)
+  }
+
+  fun limit(limit: Int, offset: Int): SelectBuilderPart4b {
+    return SelectBuilderPart4b(db, columns, tableName, where, whereArgs, "$offset,$limit")
+  }
+
   fun run(): Cursor {
     return db.query(
       SupportSQLiteQueryBuilder
@@ -138,6 +178,14 @@ class SelectBuilderPart4a(
 ) {
   fun limit(limit: Int): SelectBuilderPart5 {
     return SelectBuilderPart5(db, columns, tableName, where, whereArgs, orderBy, limit.toString())
+  }
+
+  fun limit(limit: String): SelectBuilderPart5 {
+    return SelectBuilderPart5(db, columns, tableName, where, whereArgs, orderBy, limit)
+  }
+
+  fun limit(limit: Int, offset: Int): SelectBuilderPart5 {
+    return SelectBuilderPart5(db, columns, tableName, where, whereArgs, orderBy, "$offset,$limit")
   }
 
   fun run(): Cursor {
@@ -220,6 +268,10 @@ class UpdateBuilderPart2(
     return UpdateBuilderPart3(db, tableName, values, where, SqlUtil.buildArgs(*whereArgs))
   }
 
+  fun where(@Language("sql") where: String, whereArgs: Array<String>): UpdateBuilderPart3 {
+    return UpdateBuilderPart3(db, tableName, values, where, whereArgs)
+  }
+
   fun run(conflictStrategy: Int = SQLiteDatabase.CONFLICT_NONE): Int {
     return db.update(tableName, conflictStrategy, values, null, null)
   }
@@ -244,6 +296,10 @@ class DeleteBuilderPart1(
 ) {
   fun where(@Language("sql") where: String, vararg whereArgs: Any): DeleteBuilderPart2 {
     return DeleteBuilderPart2(db, tableName, where, SqlUtil.buildArgs(*whereArgs))
+  }
+
+  fun where(@Language("sql") where: String, whereArgs: Array<String>): DeleteBuilderPart2 {
+    return DeleteBuilderPart2(db, tableName, where, whereArgs)
   }
 
   fun run(): Int {
@@ -271,6 +327,10 @@ class ExistsBuilderPart1(
     return ExistsBuilderPart2(db, tableName, where, SqlUtil.buildArgs(*whereArgs))
   }
 
+  fun where(@Language("sql") where: String, whereArgs: Array<String>): ExistsBuilderPart2 {
+    return ExistsBuilderPart2(db, tableName, where, whereArgs)
+  }
+
   fun run(): Boolean {
     return db.query("SELECT EXISTS(SELECT 1 FROM $tableName)", null).use { cursor ->
       cursor.moveToFirst() && cursor.getInt(0) == 1
@@ -290,3 +350,40 @@ class ExistsBuilderPart2(
     }
   }
 }
+
+class InsertBuilderPart1(
+  private val db: SupportSQLiteDatabase,
+  private val tableName: String
+) {
+
+  fun values(values: ContentValues): InsertBuilderPart2 {
+    return InsertBuilderPart2(db, tableName, values)
+  }
+  fun values(vararg values: Pair<String, Any?>): InsertBuilderPart2 {
+    return InsertBuilderPart2(db, tableName, contentValuesOf(*values))
+  }
+}
+
+class InsertBuilderPart2(
+  private val db: SupportSQLiteDatabase,
+  private val tableName: String,
+  private val values: ContentValues
+) {
+  fun run(conflictStrategy: Int = SQLiteDatabase.CONFLICT_IGNORE): Long {
+    return db.insert(tableName, conflictStrategy, values)
+  }
+}
+
+data class ForeignKeyConstraint(
+  val table: String,
+  val column: String,
+  val dependsOnTable: String,
+  val dependsOnColumn: String,
+  val onDelete: String
+)
+
+data class Index(
+  val name: String,
+  val table: String,
+  val columns: List<String>
+)

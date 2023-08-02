@@ -27,6 +27,7 @@ import org.signal.core.util.logging.Log;
 import org.thoughtcrime.securesms.R;
 import org.thoughtcrime.securesms.attachments.Attachment;
 import org.thoughtcrime.securesms.components.emoji.EmojiImageView;
+import org.thoughtcrime.securesms.components.emoji.EmojiTextView;
 import org.thoughtcrime.securesms.components.mention.MentionAnnotation;
 import org.thoughtcrime.securesms.components.quotes.QuoteViewColorTheme;
 import org.thoughtcrime.securesms.conversation.MessageStyler;
@@ -82,7 +83,7 @@ public class QuoteView extends FrameLayout implements RecipientForeverObserver {
   private ViewGroup          mainView;
   private ViewGroup          footerView;
   private TextView           authorView;
-  private TextView           bodyView;
+  private EmojiTextView      bodyView;
   private View               quoteBarView;
   private ShapeableImageView thumbnailView;
   private View               attachmentVideoOverlayView;
@@ -198,6 +199,7 @@ public class QuoteView extends FrameLayout implements RecipientForeverObserver {
     params.width = thumbWidth;
 
     thumbnailView.setLayoutParams(params);
+    dismissView.setVisibility(messageType == MessageType.PREVIEW ? View.VISIBLE : View.GONE);
   }
 
   public void setQuote(GlideRequests glideRequests,

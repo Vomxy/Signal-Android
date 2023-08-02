@@ -1,6 +1,8 @@
 package org.thoughtcrime.securesms.webrtc.audio;
 
 import android.annotation.SuppressLint;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothHeadset;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
@@ -52,6 +54,19 @@ public abstract class AudioManagerCompat {
     audioManager.stopBluetoothSco();
   }
 
+  public boolean isBluetoothHeadsetAvailable() {
+    if (Build.VERSION.SDK_INT >= 31) {
+      return audioManager.getAvailableCommunicationDevices().stream().anyMatch(it -> AudioDeviceMapping.fromPlatformType(it.getType()) == SignalAudioManager.AudioDevice.BLUETOOTH);
+    } else {
+      BluetoothAdapter mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+      return mBluetoothAdapter != null &&
+             mBluetoothAdapter.isEnabled() &&
+             // noinspection MissingPermission
+             mBluetoothAdapter.getProfileConnectionState(BluetoothHeadset.HEADSET) == BluetoothAdapter.STATE_CONNECTED &&
+             isBluetoothScoAvailableOffCall();
+    }
+  }
+
   public boolean isBluetoothConnected() {
     if (Build.VERSION.SDK_INT >= 31) {
       final SignalAudioManager.AudioDevice audioDevice = AudioDeviceMapping.fromPlatformType(audioManager.getCommunicationDevice().getType());
@@ -98,6 +113,11 @@ public abstract class AudioManagerCompat {
   }
 
   @RequiresApi(31)
+  public @Nullable AudioDeviceInfo getConnectedBluetoothDevice() {
+    return getAvailableCommunicationDevices().stream().filter(it -> AudioDeviceMapping.fromPlatformType(it.getType()) == SignalAudioManager.AudioDevice.BLUETOOTH).findAny().orElse(null);
+  }
+
+  @RequiresApi(31)
   public List<AudioDeviceInfo> getAvailableCommunicationDevices() {
     return audioManager.getAvailableCommunicationDevices();
   }
@@ -109,8 +129,13 @@ public abstract class AudioManagerCompat {
   }
 
   @RequiresApi(31)
-  public boolean setCommunicationDevice(@Nullable AudioDeviceInfo device) {
-    return audioManager.setCommunicationDevice(device);
+  public boolean setCommunicationDevice(@NonNull AudioDeviceInfo device) {
+    try {
+      return audioManager.setCommunicationDevice(device);
+    } catch (IllegalArgumentException e) {
+      Log.w(TAG, "Invalid device chosen.", e);
+      return false;
+    }
   }
 
   @RequiresApi(31)
@@ -163,7 +188,9 @@ public abstract class AudioManagerCompat {
   }
 
   abstract public SoundPool createSoundPool();
+
   abstract public boolean requestCallAudioFocus();
+
   abstract public void abandonCallAudioFocus();
 
   public static AudioManagerCompat create(@NonNull Context context) {
@@ -178,9 +205,9 @@ public abstract class AudioManagerCompat {
   private static class Api26AudioManagerCompat extends AudioManagerCompat {
 
     private static AudioAttributes AUDIO_ATTRIBUTES = new AudioAttributes.Builder()
-                                                                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                                                         .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                                                                         .build();
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+        .build();
 
     private AudioFocusRequest audioFocusRequest;
 
@@ -191,9 +218,9 @@ public abstract class AudioManagerCompat {
     @Override
     public SoundPool createSoundPool() {
       return new SoundPool.Builder()
-                          .setAudioAttributes(AUDIO_ATTRIBUTES)
-                          .setMaxStreams(1)
-                          .build();
+          .setAudioAttributes(AUDIO_ATTRIBUTES)
+          .setMaxStreams(1)
+          .build();
     }
 
     @Override
@@ -205,9 +232,9 @@ public abstract class AudioManagerCompat {
 
       if (audioFocusRequest == null) {
         audioFocusRequest = new AudioFocusRequest.Builder(AUDIOFOCUS_GAIN)
-                                                 .setAudioAttributes(AUDIO_ATTRIBUTES)
-                                                 .setOnAudioFocusChangeListener(onAudioFocusChangeListener)
-                                                 .build();
+            .setAudioAttributes(AUDIO_ATTRIBUTES)
+            .setOnAudioFocusChangeListener(onAudioFocusChangeListener)
+            .build();
       } else {
         Log.w(TAG, "Trying again to request audio focus");
       }
@@ -243,10 +270,10 @@ public abstract class AudioManagerCompat {
   private static class Api21AudioManagerCompat extends Api19AudioManagerCompat {
 
     private static AudioAttributes AUDIO_ATTRIBUTES = new AudioAttributes.Builder()
-                                                                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                                                         .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                                                                         .setLegacyStreamType(AudioManager.STREAM_VOICE_CALL)
-                                                                         .build();
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+        .setLegacyStreamType(AudioManager.STREAM_VOICE_CALL)
+        .build();
 
     private Api21AudioManagerCompat(@NonNull Context context) {
       super(context);
@@ -255,9 +282,9 @@ public abstract class AudioManagerCompat {
     @Override
     public SoundPool createSoundPool() {
       return new SoundPool.Builder()
-                          .setAudioAttributes(AUDIO_ATTRIBUTES)
-                          .setMaxStreams(1)
-                          .build();
+          .setAudioAttributes(AUDIO_ATTRIBUTES)
+          .setMaxStreams(1)
+          .build();
     }
   }
 

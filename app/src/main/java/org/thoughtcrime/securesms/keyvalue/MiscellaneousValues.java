@@ -1,34 +1,44 @@
 package org.thoughtcrime.securesms.keyvalue;
 
+import android.preference.PreferenceManager;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import org.thoughtcrime.securesms.components.settings.app.usernamelinks.UsernameQrCodeColorScheme;
 import org.thoughtcrime.securesms.database.model.databaseprotos.PendingChangeNumberMetadata;
+import org.thoughtcrime.securesms.dependencies.ApplicationDependencies;
+import org.thoughtcrime.securesms.jobmanager.impl.ChangeNumberConstraintObserver;
 
 import java.util.Collections;
 import java.util.List;
 
 public final class MiscellaneousValues extends SignalStoreValues {
 
-  private static final String LAST_PREKEY_REFRESH_TIME        = "last_prekey_refresh_time";
-  private static final String MESSAGE_REQUEST_ENABLE_TIME     = "message_request_enable_time";
-  private static final String LAST_PROFILE_REFRESH_TIME       = "misc.last_profile_refresh_time";
-  private static final String USERNAME_SHOW_REMINDER          = "username.show.reminder";
-  private static final String CLIENT_DEPRECATED               = "misc.client_deprecated";
-  private static final String OLD_DEVICE_TRANSFER_LOCKED      = "misc.old_device.transfer.locked";
-  private static final String HAS_EVER_HAD_AN_AVATAR          = "misc.has.ever.had.an.avatar";
-  private static final String CHANGE_NUMBER_LOCK              = "misc.change_number.lock";
-  private static final String PENDING_CHANGE_NUMBER_METADATA  = "misc.pending_change_number.metadata";
-  private static final String CENSORSHIP_LAST_CHECK_TIME      = "misc.censorship.last_check_time";
-  private static final String CENSORSHIP_SERVICE_REACHABLE    = "misc.censorship.service_reachable";
-  private static final String LAST_GV2_PROFILE_CHECK_TIME     = "misc.last_gv2_profile_check_time";
-  private static final String CDS_TOKEN                       = "misc.cds_token";
-  private static final String CDS_BLOCKED_UNTIL               = "misc.cds_blocked_until";
-  private static final String LAST_FCM_FOREGROUND_TIME        = "misc.last_fcm_foreground_time";
-  private static final String LAST_FOREGROUND_TIME            = "misc.last_foreground_time";
-  private static final String PNI_INITIALIZED_DEVICES         = "misc.pni_initialized_devices";
-  private static final String SMS_PHASE_1_START_MS            = "misc.sms_export.phase_1_start.3";
-  private static final String LINKED_DEVICES_REMINDER         = "misc.linked_devices_reminder";
+  private static final String LAST_PREKEY_REFRESH_TIME       = "last_prekey_refresh_time";
+  private static final String MESSAGE_REQUEST_ENABLE_TIME    = "message_request_enable_time";
+  private static final String LAST_PROFILE_REFRESH_TIME      = "misc.last_profile_refresh_time";
+  private static final String USERNAME_SHOW_REMINDER         = "username.show.reminder";
+  private static final String CLIENT_DEPRECATED              = "misc.client_deprecated";
+  private static final String OLD_DEVICE_TRANSFER_LOCKED     = "misc.old_device.transfer.locked";
+  private static final String HAS_EVER_HAD_AN_AVATAR         = "misc.has.ever.had.an.avatar";
+  private static final String CHANGE_NUMBER_LOCK             = "misc.change_number.lock";
+  private static final String PENDING_CHANGE_NUMBER_METADATA = "misc.pending_change_number.metadata";
+  private static final String CENSORSHIP_LAST_CHECK_TIME     = "misc.censorship.last_check_time";
+  private static final String CENSORSHIP_SERVICE_REACHABLE   = "misc.censorship.service_reachable";
+  private static final String LAST_GV2_PROFILE_CHECK_TIME    = "misc.last_gv2_profile_check_time";
+  private static final String CDS_TOKEN                      = "misc.cds_token";
+  private static final String CDS_BLOCKED_UNTIL              = "misc.cds_blocked_until";
+  private static final String LAST_FOREGROUND_TIME           = "misc.last_foreground_time";
+  private static final String PNI_INITIALIZED_DEVICES        = "misc.pni_initialized_devices";
+  private static final String LINKED_DEVICES_REMINDER        = "misc.linked_devices_reminder";
+  private static final String HAS_LINKED_DEVICES             = "misc.linked_devices_present";
+  private static final String USERNAME_QR_CODE_COLOR         = "mis.username_qr_color_scheme";
+  private static final String KEYBOARD_LANDSCAPE_HEIGHT      = "misc.keyboard.landscape_height";
+  private static final String KEYBOARD_PORTRAIT_HEIGHT       = "misc.keyboard.protrait_height";
+  private static final String LAST_CONSISTENCY_CHECK_TIME    = "misc.last_consistency_check_time";
+  private static final String SERVER_TIME_OFFSET             = "misc.server_time_offset";
+  private static final String LAST_SERVER_TIME_OFFSET_UPDATE = "misc.last_server_time_offset_update";
 
   MiscellaneousValues(@NonNull KeyValueStore store) {
     super(store);
@@ -41,14 +51,17 @@ public final class MiscellaneousValues extends SignalStoreValues {
 
   @Override
   @NonNull List<String> getKeysToIncludeInBackup() {
-    return Collections.singletonList(SMS_PHASE_1_START_MS);
+    return Collections.emptyList();
   }
 
-  public long getLastPrekeyRefreshTime() {
+  /**
+   * Represents the last time a _full_ prekey refreshed finished. That means signed+one-time prekeys for both ACI and PNI.
+   */
+  public long getLastFullPrekeyRefreshTime() {
     return getLong(LAST_PREKEY_REFRESH_TIME, 0);
   }
 
-  public void setLastPrekeyRefreshTime(long time) {
+  public void setLastFullPrekeyRefreshTime(long time) {
     putLong(LAST_PREKEY_REFRESH_TIME, time);
   }
 
@@ -110,10 +123,12 @@ public final class MiscellaneousValues extends SignalStoreValues {
 
   public void lockChangeNumber() {
     putBoolean(CHANGE_NUMBER_LOCK, true);
+    ChangeNumberConstraintObserver.INSTANCE.onChange();
   }
 
   public void unlockChangeNumber() {
     putBoolean(CHANGE_NUMBER_LOCK, false);
+    ChangeNumberConstraintObserver.INSTANCE.onChange();
   }
 
   public @Nullable PendingChangeNumberMetadata getPendingChangeNumberMetadata() {
@@ -200,14 +215,6 @@ public final class MiscellaneousValues extends SignalStoreValues {
     return getLong(CDS_BLOCKED_UNTIL, 0);
   }
 
-  public long getLastFcmForegroundServiceTime() {
-    return getLong(LAST_FCM_FOREGROUND_TIME, 0);
-  }
-
-  public void setLastFcmForegroundServiceTime(long time) {
-    putLong(LAST_FCM_FOREGROUND_TIME, time);
-  }
-
   public long getLastForegroundTime() {
     return getLong(LAST_FOREGROUND_TIME, 0);
   }
@@ -224,22 +231,16 @@ public final class MiscellaneousValues extends SignalStoreValues {
     putBoolean(PNI_INITIALIZED_DEVICES, value);
   }
 
-  public void startSmsPhase1() {
-    if (!getStore().containsKey(SMS_PHASE_1_START_MS)) {
-      putLong(SMS_PHASE_1_START_MS, System.currentTimeMillis());
-    }
-  }
-
   public @NonNull SmsExportPhase getSmsExportPhase() {
-    long now = System.currentTimeMillis();
-    long phase1StartMs = getLong(SMS_PHASE_1_START_MS, now);
-    return SmsExportPhase.getCurrentPhase(now - phase1StartMs);
+    return SmsExportPhase.getCurrentPhase();
   }
 
-  public long getSmsPhase3Start() {
-    long now = System.currentTimeMillis();
-    long phase1StartMs = getLong(SMS_PHASE_1_START_MS, now);
-    return phase1StartMs + SmsExportPhase.PHASE_3.getDuration();
+  public void setHasLinkedDevices(boolean value) {
+    putBoolean(HAS_LINKED_DEVICES, value);
+  }
+
+  public boolean getHasLinkedDevices() {
+    return getBoolean(HAS_LINKED_DEVICES, false);
   }
 
   public void setShouldShowLinkedDevicesReminder(boolean value) {
@@ -248,5 +249,86 @@ public final class MiscellaneousValues extends SignalStoreValues {
 
   public boolean getShouldShowLinkedDevicesReminder() {
     return getBoolean(LINKED_DEVICES_REMINDER, false);
+  }
+
+  /** The color the user saved for rendering their shareable username QR code. */
+  public @NonNull UsernameQrCodeColorScheme getUsernameQrCodeColorScheme() {
+    String serialized = getString(USERNAME_QR_CODE_COLOR, null);
+    return UsernameQrCodeColorScheme.deserialize(serialized);
+  }
+
+  public void setUsernameQrCodeColorScheme(@NonNull UsernameQrCodeColorScheme color) {
+    putString(USERNAME_QR_CODE_COLOR, color.serialize());
+  }
+
+  public int getKeyboardLandscapeHeight() {
+    int height = (int) getLong(KEYBOARD_LANDSCAPE_HEIGHT, 0);
+    if (height == 0) {
+      //noinspection deprecation
+      height = PreferenceManager.getDefaultSharedPreferences(ApplicationDependencies.getApplication())
+                                .getInt("keyboard_height_landscape", 0);
+
+      if (height > 0) {
+        setKeyboardLandscapeHeight(height);
+      }
+    }
+    return height;
+  }
+
+  public void setKeyboardLandscapeHeight(int height) {
+    putLong(KEYBOARD_LANDSCAPE_HEIGHT, height);
+  }
+
+  public int getKeyboardPortraitHeight() {
+    int height = (int) getInteger(KEYBOARD_PORTRAIT_HEIGHT, 0);
+    if (height == 0) {
+      //noinspection deprecation
+      height = PreferenceManager.getDefaultSharedPreferences(ApplicationDependencies.getApplication())
+                                .getInt("keyboard_height_portrait", 0);
+
+      if (height > 0) {
+        setKeyboardPortraitHeight(height);
+      }
+    }
+    return height;
+  }
+
+  public void setKeyboardPortraitHeight(int height) {
+    putInteger(KEYBOARD_PORTRAIT_HEIGHT, height);
+  }
+
+  public long getLastConsistencyCheckTime() {
+    return getLong(LAST_CONSISTENCY_CHECK_TIME, 0);
+  }
+
+  public void setLastConsistencyCheckTime(long time) {
+    putLong(LAST_CONSISTENCY_CHECK_TIME, time);
+  }
+
+  /**
+   * Sets the last-known server time.
+   */
+  public void setLastKnownServerTime(long serverTime, long currentTime) {
+    getStore()
+        .beginWrite()
+        .putLong(SERVER_TIME_OFFSET, currentTime - serverTime)
+        .putLong(LAST_SERVER_TIME_OFFSET_UPDATE, System.currentTimeMillis())
+        .apply();
+  }
+
+  /**
+   * The last-known offset between our local clock and the server. To get an estimate of the server time, take your current time and subtract this offset. e.g.
+   *
+   * estimatedServerTime = System.currentTimeMillis() - SignalStore.misc().getLastKnownServerTimeOffset()
+   */
+  public long getLastKnownServerTimeOffset() {
+    return getLong(SERVER_TIME_OFFSET, 0);
+  }
+
+  /**
+   * The last time (using our local clock) we updated the server time offset returned by {@link #getLastKnownServerTimeOffset()}}.
+   */
+  public long getLastKnownServerTimeOffsetUpdateTime() {
+    return getLong(LAST_SERVER_TIME_OFFSET_UPDATE, 0);
   }
 }

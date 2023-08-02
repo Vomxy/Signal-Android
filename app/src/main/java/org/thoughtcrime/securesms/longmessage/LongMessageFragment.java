@@ -3,7 +3,6 @@ package org.thoughtcrime.securesms.longmessage;
 import android.graphics.PorterDuff;
 import android.os.Bundle;
 import android.text.SpannableString;
-import android.text.method.LinkMovementMethod;
 import android.text.style.URLSpan;
 import android.text.util.Linkify;
 import android.util.TypedValue;
@@ -24,10 +23,12 @@ import org.thoughtcrime.securesms.R;
 import org.thoughtcrime.securesms.components.ConversationItemFooter;
 import org.thoughtcrime.securesms.components.FullScreenDialogFragment;
 import org.thoughtcrime.securesms.components.emoji.EmojiTextView;
+import org.thoughtcrime.securesms.conversation.ConversationItemDisplayMode;
 import org.thoughtcrime.securesms.conversation.colors.ColorizerView;
 import org.thoughtcrime.securesms.keyvalue.SignalStore;
 import org.thoughtcrime.securesms.recipients.Recipient;
 import org.thoughtcrime.securesms.util.LinkUtil;
+import org.thoughtcrime.securesms.util.LongClickMovementMethod;
 import org.thoughtcrime.securesms.util.Projection;
 import org.thoughtcrime.securesms.util.ThemeUtil;
 import org.thoughtcrime.securesms.util.views.Stub;
@@ -102,7 +103,7 @@ public class LongMessageFragment extends FullScreenDialogFragment {
       if (message.get().getMessageRecord().isOutgoing()) {
         toolbar.setTitle(getString(R.string.LongMessageActivity_your_message));
       } else {
-        Recipient recipient = message.get().getMessageRecord().getRecipient();
+        Recipient recipient = message.get().getMessageRecord().getFromRecipient();
         String    name      = recipient.getDisplayName(requireContext());
 
         toolbar.setTitle(getString(R.string.LongMessageActivity_message_from_s, name));
@@ -113,8 +114,8 @@ public class LongMessageFragment extends FullScreenDialogFragment {
       if (message.get().getMessageRecord().isOutgoing()) {
         bubble = sentBubble.get();
         colorizerView.setVisibility(View.VISIBLE);
-        colorizerView.setBackground(message.get().getMessageRecord().getRecipient().getChatColors().getChatBubbleMask());
-        bubble.getBackground().setColorFilter(message.get().getMessageRecord().getRecipient().getChatColors().getChatBubbleColorFilter());
+        colorizerView.setBackground(message.get().getMessageRecord().getToRecipient().getChatColors().getChatBubbleMask());
+        bubble.getBackground().setColorFilter(message.get().getMessageRecord().getToRecipient().getChatColors().getChatBubbleColorFilter());
         bubble.addOnLayoutChangeListener(bubbleLayoutListener);
         bubbleLayoutListener.onLayoutChange(bubble, 0, 0, 0, 0, 0, 0, 0, 0);
       } else {
@@ -130,14 +131,14 @@ public class LongMessageFragment extends FullScreenDialogFragment {
 
       bubble.setVisibility(View.VISIBLE);
       text.setText(styledBody);
-      text.setMovementMethod(LinkMovementMethod.getInstance());
+      text.setMovementMethod(LongClickMovementMethod.getInstance(getContext()));
       text.setTextSize(TypedValue.COMPLEX_UNIT_SP, SignalStore.settings().getMessageFontSize());
       if (!message.get().getMessageRecord().isOutgoing()) {
         text.setMentionBackgroundTint(ContextCompat.getColor(requireContext(), ThemeUtil.isDarkTheme(requireActivity()) ? R.color.core_grey_60 : R.color.core_grey_20));
       } else {
         text.setMentionBackgroundTint(ContextCompat.getColor(requireContext(), R.color.transparent_black_40));
       }
-      footer.setMessageRecord(message.get().getMessageRecord(), Locale.getDefault());
+      footer.setMessageRecord(message.get().getMessageRecord(), Locale.getDefault(), ConversationItemDisplayMode.STANDARD);
     });
   }
 

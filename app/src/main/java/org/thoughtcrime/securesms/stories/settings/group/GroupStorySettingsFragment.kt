@@ -6,6 +6,8 @@ import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.viewModels
 import androidx.navigation.fragment.findNavController
+import io.reactivex.rxjava3.kotlin.subscribeBy
+import org.signal.core.util.concurrent.LifecycleDisposable
 import org.signal.core.util.dp
 import org.thoughtcrime.securesms.R
 import org.thoughtcrime.securesms.components.menu.ActionItem
@@ -17,7 +19,6 @@ import org.thoughtcrime.securesms.components.settings.configure
 import org.thoughtcrime.securesms.conversation.ConversationIntents
 import org.thoughtcrime.securesms.stories.dialogs.StoryDialogs
 import org.thoughtcrime.securesms.stories.settings.custom.PrivateStoryItem
-import org.thoughtcrime.securesms.util.LifecycleDisposable
 import org.thoughtcrime.securesms.util.adapter.mapping.MappingAdapter
 
 /**
@@ -45,8 +46,10 @@ class GroupStorySettingsFragment : DSLSettingsFragment(menuId = R.menu.story_gro
               iconRes = R.drawable.ic_open_24_tinted,
               title = getString(R.string.StoriesLandingItem__go_to_chat),
               action = {
-                lifecycleDisposable += viewModel.getConversationData().subscribe { data ->
-                  startActivity(ConversationIntents.createBuilder(requireContext(), data.groupRecipientId, data.groupThreadId).build())
+                lifecycleDisposable += viewModel.getConversationData().flatMap { data ->
+                  ConversationIntents.createBuilder(requireContext(), data.groupRecipientId, data.groupThreadId)
+                }.subscribeBy {
+                  startActivity(it.build())
                 }
               }
             )

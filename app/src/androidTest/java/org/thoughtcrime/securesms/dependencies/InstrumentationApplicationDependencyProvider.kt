@@ -2,14 +2,18 @@ package org.thoughtcrime.securesms.dependencies
 
 import android.app.Application
 import okhttp3.ConnectionSpec
+import okhttp3.Response
+import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okio.ByteString
 import org.mockito.kotlin.any
 import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.mock
+import org.signal.core.util.logging.Log
 import org.thoughtcrime.securesms.BuildConfig
 import org.thoughtcrime.securesms.KbsEnclave
 import org.thoughtcrime.securesms.push.SignalServiceNetworkAccess
@@ -29,6 +33,7 @@ import org.whispersystems.signalservice.internal.configuration.SignalKeyBackupSe
 import org.whispersystems.signalservice.internal.configuration.SignalServiceConfiguration
 import org.whispersystems.signalservice.internal.configuration.SignalServiceUrl
 import org.whispersystems.signalservice.internal.configuration.SignalStorageUrl
+import org.whispersystems.signalservice.internal.configuration.SignalSvr2Url
 import java.security.KeyStore
 import java.util.Optional
 
@@ -52,7 +57,10 @@ class InstrumentationApplicationDependencyProvider(application: Application, def
       baseUrl = webServer.url("").toString()
 
       addMockWebRequestHandlers(
-        Get("/v1/websocket/") {
+        Get("/v1/websocket/?login=") {
+          MockResponse().success().withWebSocketUpgrade(mockIdentifiedWebSocket)
+        },
+        Get("/v1/websocket", { !it.path.contains("login") }) {
           MockResponse().success().withWebSocketUpgrade(object : WebSocketListener() {})
         }
       )
@@ -60,27 +68,27 @@ class InstrumentationApplicationDependencyProvider(application: Application, def
 
     webServer.setDispatcher(object : Dispatcher() {
       override fun dispatch(request: RecordedRequest): MockResponse {
-        val handler = handlers.firstOrNull {
-          request.method == it.verb && request.path.startsWith("/${it.path}")
-        }
+        val handler = handlers.firstOrNull { it.requestPredicate(request) }
         return handler?.responseFactory?.invoke(request) ?: MockResponse().setResponseCode(500)
       }
     })
 
     serviceTrustStore = SignalServiceTrustStore(application)
     uncensoredConfiguration = SignalServiceConfiguration(
-      arrayOf(SignalServiceUrl(baseUrl, "localhost", serviceTrustStore, ConnectionSpec.CLEARTEXT)),
-      mapOf(
+      signalServiceUrls = arrayOf(SignalServiceUrl(baseUrl, "localhost", serviceTrustStore, ConnectionSpec.CLEARTEXT)),
+      signalCdnUrlMap = mapOf(
         0 to arrayOf(SignalCdnUrl(baseUrl, "localhost", serviceTrustStore, ConnectionSpec.CLEARTEXT)),
         2 to arrayOf(SignalCdnUrl(baseUrl, "localhost", serviceTrustStore, ConnectionSpec.CLEARTEXT))
       ),
-      arrayOf(SignalKeyBackupServiceUrl(baseUrl, "localhost", serviceTrustStore, ConnectionSpec.CLEARTEXT)),
-      arrayOf(SignalStorageUrl(baseUrl, "localhost", serviceTrustStore, ConnectionSpec.CLEARTEXT)),
-      arrayOf(SignalCdsiUrl(baseUrl, "localhost", serviceTrustStore, ConnectionSpec.CLEARTEXT)),
-      emptyList(),
-      Optional.of(SignalServiceNetworkAccess.DNS),
-      Optional.empty(),
-      Base64.decode(BuildConfig.ZKGROUP_SERVER_PUBLIC_PARAMS)
+      signalKeyBackupServiceUrls = arrayOf(SignalKeyBackupServiceUrl(baseUrl, "localhost", serviceTrustStore, ConnectionSpec.CLEARTEXT)),
+      signalStorageUrls = arrayOf(SignalStorageUrl(baseUrl, "localhost", serviceTrustStore, ConnectionSpec.CLEARTEXT)),
+      signalCdsiUrls = arrayOf(SignalCdsiUrl(baseUrl, "localhost", serviceTrustStore, ConnectionSpec.CLEARTEXT)),
+      signalSvr2Urls = arrayOf(SignalSvr2Url(baseUrl, serviceTrustStore, "localhost", ConnectionSpec.CLEARTEXT)),
+      networkInterceptors = emptyList(),
+      dns = Optional.of(SignalServiceNetworkAccess.DNS),
+      signalProxy = Optional.empty(),
+      zkGroupServerPublicParams = Base64.decode(BuildConfig.ZKGROUP_SERVER_PUBLIC_PARAMS),
+      genericServerPublicParams = Base64.decode(BuildConfig.GENERIC_SERVER_PUBLIC_PARAMS)
     )
 
     serviceNetworkAccessMock = mock {
@@ -106,16 +114,49 @@ class InstrumentationApplicationDependencyProvider(application: Application, def
     return recipientCache
   }
 
+  class MockWebSocket : WebSocketListener() {
+    private val TAG = "MockWebSocket"
+
+    var webSocket: WebSocket? = null
+      private set
+
+    override fun onOpen(webSocket: WebSocket, response: Response) {
+      Log.i(TAG, "onOpen(${webSocket.hashCode()})")
+      this.webSocket = webSocket
+    }
+
+    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+      Log.i(TAG, "onClosing(${webSocket.hashCode()}): $code, $reason")
+      this.webSocket = null
+    }
+
+    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+      Log.i(TAG, "onClosed(${webSocket.hashCode()}): $code, $reason")
+      this.webSocket = null
+    }
+
+    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+      Log.w(TAG, "onFailure(${webSocket.hashCode()})", t)
+      this.webSocket = null
+    }
+  }
+
   companion object {
     lateinit var webServer: MockWebServer
       private set
     lateinit var baseUrl: String
       private set
 
+    val mockIdentifiedWebSocket = MockWebSocket()
+
     private val handlers: MutableList<Verb> = mutableListOf()
 
     fun addMockWebRequestHandlers(vararg verbs: Verb) {
       handlers.addAll(verbs)
+    }
+
+    fun injectWebSocketMessage(value: ByteString) {
+      mockIdentifiedWebSocket.webSocket!!.send(value)
     }
 
     fun clearHandlers() {

@@ -14,6 +14,7 @@ import org.thoughtcrime.securesms.R
 import org.thoughtcrime.securesms.attachments.Attachment
 import org.thoughtcrime.securesms.color.ViewColorSet
 import org.thoughtcrime.securesms.conversation.ConversationMessage
+import org.thoughtcrime.securesms.conversation.MessageStyler
 import org.thoughtcrime.securesms.conversation.mutiselect.Multiselect
 import org.thoughtcrime.securesms.conversation.mutiselect.MultiselectPart
 import org.thoughtcrime.securesms.database.SignalDatabase
@@ -23,6 +24,7 @@ import org.thoughtcrime.securesms.mms.PartAuthority
 import org.thoughtcrime.securesms.sharing.MultiShareArgs
 import org.thoughtcrime.securesms.stories.Stories
 import org.thoughtcrime.securesms.util.MediaUtil
+import org.thoughtcrime.securesms.util.hasSharedContact
 import java.util.Optional
 import java.util.function.Consumer
 
@@ -116,7 +118,6 @@ data class MultiselectForwardFragmentArgs @JvmOverloads constructor(
         .withMentions(conversationMessage.mentions)
         .withTimestamp(conversationMessage.messageRecord.timestamp)
         .withExpiration(conversationMessage.messageRecord.expireStarted + conversationMessage.messageRecord.expiresIn)
-        .withBodyRanges(conversationMessage.messageRecord.messageRanges)
 
       if (conversationMessage.multiselectCollection.isTextSelected(selectedParts)) {
         val mediaMessage: MmsMessageRecord? = conversationMessage.messageRecord as? MmsMessageRecord
@@ -124,16 +125,24 @@ data class MultiselectForwardFragmentArgs @JvmOverloads constructor(
         if (textSlideUri != null) {
           PartAuthority.getAttachmentStream(context, textSlideUri).use {
             val body = StreamUtil.readFullyAsString(it)
-            val msg = ConversationMessage.ConversationMessageFactory.createWithUnresolvedData(context, mediaMessage, body)
-            builder.withDraftText(msg.getDisplayBody(context).toString())
+            val msg = ConversationMessage.ConversationMessageFactory.createWithUnresolvedData(context, mediaMessage, body, conversationMessage.threadRecipient)
+            val displayText = msg.getDisplayBody(context)
+            builder.withDraftText(displayText.toString())
+              .withBodyRanges(MessageStyler.getStyling(displayText))
           }
         } else {
-          builder.withDraftText(conversationMessage.getDisplayBody(context).toString())
+          val displayText = conversationMessage.getDisplayBody(context)
+          builder.withDraftText(displayText.toString())
+            .withBodyRanges(MessageStyler.getStyling(displayText))
         }
 
         val linkPreview = mediaMessage?.linkPreviews?.firstOrNull()
         builder.withLinkPreview(linkPreview)
         builder.asTextStory(mediaMessage?.storyType?.isTextStory ?: false)
+      }
+
+      if (conversationMessage.messageRecord.hasSharedContact() && conversationMessage.multiselectCollection.isMediaSelected(selectedParts)) {
+        builder.withSharedContacts((conversationMessage.messageRecord as MmsMessageRecord).sharedContacts)
       }
 
       if (conversationMessage.messageRecord.isMms && conversationMessage.multiselectCollection.isMediaSelected(selectedParts)) {

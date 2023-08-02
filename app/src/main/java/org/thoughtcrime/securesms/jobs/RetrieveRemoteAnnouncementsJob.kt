@@ -19,8 +19,8 @@ import org.thoughtcrime.securesms.database.model.addLink
 import org.thoughtcrime.securesms.database.model.addStyle
 import org.thoughtcrime.securesms.database.model.databaseprotos.BodyRangeList
 import org.thoughtcrime.securesms.dependencies.ApplicationDependencies
-import org.thoughtcrime.securesms.jobmanager.Data
 import org.thoughtcrime.securesms.jobmanager.Job
+import org.thoughtcrime.securesms.jobmanager.JsonJobData
 import org.thoughtcrime.securesms.jobmanager.impl.NetworkConstraint
 import org.thoughtcrime.securesms.keyvalue.SignalStore
 import org.thoughtcrime.securesms.notifications.v2.ConversationId
@@ -81,7 +81,7 @@ class RetrieveRemoteAnnouncementsJob private constructor(private val force: Bool
     }
   }
 
-  override fun serialize(): Data = Data.Builder().putBoolean(KEY_FORCE, force).build()
+  override fun serialize(): ByteArray? = JsonJobData.Builder().putBoolean(KEY_FORCE, force).serialize()
 
   override fun getFactoryKey(): String = KEY
 
@@ -187,9 +187,30 @@ class RetrieveRemoteAnnouncementsJob private constructor(private val force: Bool
     resolvedNotes
       .filterNotNull()
       .forEach { note ->
-        val body = "${note.translation.title}\n\n${note.translation.body}"
+        val title = "${note.translation.title}\n\n"
+        val body = "$title${note.translation.body}"
         val bodyRangeList = BodyRangeList.newBuilder()
           .addStyle(BodyRangeList.BodyRange.Style.BOLD, 0, note.translation.title.length)
+
+        if (note.translation.bodyRanges?.isNotEmpty() == true) {
+          note.translation.bodyRanges
+            .filter { it.style != null && it.start != null && it.length != null }
+            .map { it.copy(start = it.start!! + title.length) }
+            .forEach {
+              val style = when (it.style!!) {
+                "bold" -> BodyRangeList.BodyRange.Style.BOLD
+                "italic" -> BodyRangeList.BodyRange.Style.ITALIC
+                "strikethrough" -> BodyRangeList.BodyRange.Style.STRIKETHROUGH
+                "spoiler" -> BodyRangeList.BodyRange.Style.SPOILER
+                "mono" -> BodyRangeList.BodyRange.Style.MONOSPACE
+                else -> null
+              }
+
+              if (style != null && it.start!! in body.indices && (it.start + it.length!! - 1) in body.indices) {
+                bodyRangeList.addStyle(style, it.start, it.length)
+              }
+            }
+        }
 
         if (note.releaseNote.link?.isNotEmpty() == true && note.translation.linkText?.isNotEmpty() == true) {
           val linkIndex = body.indexOf(note.translation.linkText)
@@ -405,7 +426,14 @@ class RetrieveRemoteAnnouncementsJob private constructor(private val force: Bool
     @JsonProperty val linkText: String?,
     @JsonProperty val title: String,
     @JsonProperty val body: String,
-    @JsonProperty val callToActionText: String?
+    @JsonProperty val callToActionText: String?,
+    @JsonProperty val bodyRanges: List<ReleaseNoteBodyRange>?
+  )
+
+  data class ReleaseNoteBodyRange(
+    @JsonProperty val style: String?,
+    @JsonProperty val start: Int?,
+    @JsonProperty val length: Int?
   )
 
   data class TranslatedRemoteMegaphone(
@@ -418,7 +446,8 @@ class RetrieveRemoteAnnouncementsJob private constructor(private val force: Bool
   )
 
   class Factory : Job.Factory<RetrieveRemoteAnnouncementsJob> {
-    override fun create(parameters: Parameters, data: Data): RetrieveRemoteAnnouncementsJob {
+    override fun create(parameters: Parameters, serializedData: ByteArray?): RetrieveRemoteAnnouncementsJob {
+      val data = JsonJobData.deserialize(serializedData)
       return RetrieveRemoteAnnouncementsJob(data.getBoolean(KEY_FORCE), parameters)
     }
   }

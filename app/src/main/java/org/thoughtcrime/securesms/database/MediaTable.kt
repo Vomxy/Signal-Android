@@ -6,7 +6,6 @@ import android.database.Cursor
 import org.signal.core.util.requireInt
 import org.signal.core.util.requireLong
 import org.signal.core.util.requireNonNullString
-import org.signal.core.util.toSingleLine
 import org.thoughtcrime.securesms.attachments.DatabaseAttachment
 import org.thoughtcrime.securesms.recipients.RecipientId
 import org.thoughtcrime.securesms.util.MediaUtil
@@ -49,14 +48,15 @@ class MediaTable internal constructor(context: Context?, databaseHelper: SignalD
         ${AttachmentTable.TABLE_NAME}.${AttachmentTable.CAPTION}, 
         ${AttachmentTable.TABLE_NAME}.${AttachmentTable.NAME}, 
         ${AttachmentTable.TABLE_NAME}.${AttachmentTable.UPLOAD_TIMESTAMP}, 
+        ${AttachmentTable.TABLE_NAME}.${AttachmentTable.MAC_DIGEST}, 
         ${MessageTable.TABLE_NAME}.${MessageTable.TYPE}, 
         ${MessageTable.TABLE_NAME}.${MessageTable.DATE_SENT}, 
         ${MessageTable.TABLE_NAME}.${MessageTable.DATE_RECEIVED}, 
         ${MessageTable.TABLE_NAME}.${MessageTable.DATE_SERVER}, 
         ${MessageTable.TABLE_NAME}.${MessageTable.THREAD_ID}, 
-        ${MessageTable.TABLE_NAME}.${MessageTable.RECIPIENT_ID}, 
+        ${MessageTable.TABLE_NAME}.${MessageTable.FROM_RECIPIENT_ID}, 
         ${ThreadTable.TABLE_NAME}.${ThreadTable.RECIPIENT_ID} as $THREAD_RECIPIENT_ID 
-      FROM 
+   FROM 
         ${AttachmentTable.TABLE_NAME} 
         LEFT JOIN ${MessageTable.TABLE_NAME} ON ${AttachmentTable.TABLE_NAME}.${AttachmentTable.MMS_ID} = ${MessageTable.TABLE_NAME}.${MessageTable.ID} 
         LEFT JOIN ${ThreadTable.TABLE_NAME} ON ${ThreadTable.TABLE_NAME}.${ThreadTable.ID} = ${MessageTable.TABLE_NAME}.${MessageTable.THREAD_ID} 
@@ -70,6 +70,7 @@ class MediaTable internal constructor(context: Context?, databaseHelper: SignalD
         ${MessageTable.VIEW_ONCE} = 0 AND 
         ${MessageTable.STORY_TYPE} = 0 AND 
         ${AttachmentTable.DATA} IS NOT NULL AND 
+        ${MessageTable.LATEST_REVISION_ID} IS NULL AND 
         (
           ${AttachmentTable.QUOTE} = 0 OR 
           (
@@ -78,9 +79,9 @@ class MediaTable internal constructor(context: Context?, databaseHelper: SignalD
           )
         ) AND 
         ${AttachmentTable.STICKER_PACK_ID} IS NULL AND 
-        ${MessageTable.TABLE_NAME}.${MessageTable.RECIPIENT_ID} > 0 AND 
+        ${MessageTable.TABLE_NAME}.${MessageTable.FROM_RECIPIENT_ID} > 0 AND 
         $THREAD_RECIPIENT_ID > 0
-      """.toSingleLine()
+      """
 
     private val UNIQUE_MEDIA_QUERY = """
         SELECT 
@@ -92,14 +93,14 @@ class MediaTable internal constructor(context: Context?, databaseHelper: SignalD
           ${AttachmentTable.STICKER_PACK_ID} IS NULL AND 
           ${AttachmentTable.TRANSFER_STATE} = ${AttachmentTable.TRANSFER_PROGRESS_DONE} 
         GROUP BY ${AttachmentTable.DATA}
-      """.toSingleLine()
+      """
 
     private val GALLERY_MEDIA_QUERY = String.format(
       BASE_MEDIA_QUERY,
       """
         ${AttachmentTable.CONTENT_TYPE} NOT LIKE 'image/svg%' AND 
         (${AttachmentTable.CONTENT_TYPE} LIKE 'image/%' OR ${AttachmentTable.CONTENT_TYPE} LIKE 'video/%')
-      """.toSingleLine()
+      """
     )
 
     private val AUDIO_MEDIA_QUERY = String.format(BASE_MEDIA_QUERY, "${AttachmentTable.CONTENT_TYPE} LIKE 'audio/%'")
@@ -113,7 +114,7 @@ class MediaTable internal constructor(context: Context?, databaseHelper: SignalD
           ${AttachmentTable.CONTENT_TYPE} NOT LIKE 'video/%' AND 
           ${AttachmentTable.CONTENT_TYPE} NOT LIKE 'audio/%' AND 
           ${AttachmentTable.CONTENT_TYPE} NOT LIKE 'text/x-signal-plain'
-        )""".toSingleLine()
+        )"""
     )
 
     private fun applyEqualityOperator(threadId: Long, query: String): String {
@@ -204,7 +205,7 @@ class MediaTable internal constructor(context: Context?, databaseHelper: SignalD
 
         return MediaRecord(
           attachment = if (attachments.isNotEmpty()) attachments[0] else null,
-          recipientId = RecipientId.from(cursor.requireLong(MessageTable.RECIPIENT_ID)),
+          recipientId = RecipientId.from(cursor.requireLong(MessageTable.FROM_RECIPIENT_ID)),
           threadId = cursor.requireLong(MessageTable.THREAD_ID),
           threadRecipientId = RecipientId.from(cursor.requireLong(THREAD_RECIPIENT_ID)),
           date = if (MessageTypes.isPushType(cursor.requireLong(MessageTable.TYPE))) {
@@ -224,20 +225,20 @@ class MediaTable internal constructor(context: Context?, databaseHelper: SignalD
         ${AttachmentTable.TABLE_NAME}.${AttachmentTable.MMS_ID} DESC, 
         ${AttachmentTable.TABLE_NAME}.${AttachmentTable.DISPLAY_ORDER} DESC, 
         ${AttachmentTable.TABLE_NAME}.${AttachmentTable.ROW_ID} DESC
-      """.toSingleLine()
+      """
     ),
     Oldest(
       """
         ${AttachmentTable.TABLE_NAME}.${AttachmentTable.MMS_ID} ASC, 
         ${AttachmentTable.TABLE_NAME}.${AttachmentTable.DISPLAY_ORDER} DESC, 
         ${AttachmentTable.TABLE_NAME}.${AttachmentTable.ROW_ID} ASC
-      """.toSingleLine()
+      """
     ),
     Largest(
       """
         ${AttachmentTable.TABLE_NAME}.${AttachmentTable.SIZE} DESC, 
         ${AttachmentTable.TABLE_NAME}.${AttachmentTable.DISPLAY_ORDER} DESC
-      """.toSingleLine()
+      """
     );
 
     private val postFix: String

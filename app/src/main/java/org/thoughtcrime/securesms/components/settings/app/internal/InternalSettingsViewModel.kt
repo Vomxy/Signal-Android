@@ -94,13 +94,18 @@ class InternalSettingsViewModel(private val repository: InternalSettingsReposito
     refresh()
   }
 
-  fun setInternalCallingBandwidthMode(bandwidthMode: CallManager.BandwidthMode) {
-    preferenceDataStore.putInt(InternalValues.CALLING_BANDWIDTH_MODE, bandwidthMode.ordinal)
+  fun setInternalCallingDataMode(dataMode: CallManager.DataMode) {
+    preferenceDataStore.putInt(InternalValues.CALLING_DATA_MODE, dataMode.ordinal)
     refresh()
   }
 
   fun setInternalCallingDisableTelecom(enabled: Boolean) {
     preferenceDataStore.putBoolean(InternalValues.CALLING_DISABLE_TELECOM, enabled)
+    refresh()
+  }
+
+  fun setUseConversationItemV2(enabled: Boolean) {
+    SignalStore.internalValues().setUseConversationItemV2(enabled)
     refresh()
   }
 
@@ -122,7 +127,7 @@ class InternalSettingsViewModel(private val repository: InternalSettingsReposito
     forceWebsocketMode = SignalStore.internalValues().isWebsocketModeForced,
     callingServer = SignalStore.internalValues().groupCallingServer(),
     callingAudioProcessingMethod = SignalStore.internalValues().callingAudioProcessingMethod(),
-    callingBandwidthMode = SignalStore.internalValues().callingBandwidthMode(),
+    callingDataMode = SignalStore.internalValues().callingDataMode(),
     callingDisableTelecom = SignalStore.internalValues().callingDisableTelecom(),
     useBuiltInEmojiSet = SignalStore.internalValues().forceBuiltInEmoji(),
     emojiVersion = null,
@@ -130,7 +135,8 @@ class InternalSettingsViewModel(private val repository: InternalSettingsReposito
     delayResends = SignalStore.internalValues().delayResends(),
     disableStorageService = SignalStore.internalValues().storageServiceDisabled(),
     canClearOnboardingState = SignalStore.storyValues().hasDownloadedOnboardingStory && Stories.isFeatureEnabled(),
-    pnpInitialized = SignalStore.misc().hasPniInitializedDevices()
+    pnpInitialized = SignalStore.misc().hasPniInitializedDevices(),
+    useConversationItemV2 = SignalStore.internalValues().useConversationItemV2()
   )
 
   fun onClearOnboardingState() {
